@@ -39,7 +39,7 @@ function checkExifTool() {
 }
 
 // Function to update metadata for a single JPEG file
-async function processJpegFolder(inputFile, outputFile, metadata) {
+async function processJpgFolder(inputFile, outputFile, metadata) {
   if (!checkExifTool()) {
     throw new Error('ExifTool not installed');
   }
@@ -85,4 +85,4 @@ async function processJpegFolder(inputFile, outputFile, metadata) {
   }
 }
 
-module.exports = { processJpegFolder };
+module.exports = { processJpgFolder };

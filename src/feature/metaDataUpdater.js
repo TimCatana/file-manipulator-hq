@@ -2,7 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const { log } = require('../backend/logging/logUtils');
 const { processGifFolder } = require('../backend/meta-data-updaters/updateGifMetadata');
-const { processJpegFolder } = require('../backend/meta-data-updaters/updateJpegMetadata');
+const { processJpgFolder } = require('../backend/meta-data-updaters/updateJpgMetadata');
 const { processMp4Folder } = require('../backend/meta-data-updaters/updateMp4Metadata');
 const { processPngFolder } = require('../backend/meta-data-updaters/updatePngMetadata');
 const { processWebpFolder } = require('../backend/meta-data-updaters/updateWebpMetadata');
@@ -10,8 +10,8 @@ const { processWebpFolder } = require('../backend/meta-data-updaters/updateWebpM
 // Map file extensions to their respective updater functions
 const metadataUpdaters = {
   '.gif': processGifFolder,
-  '.jpg': processJpegFolder,
-  '.jpeg': processJpegFolder,
+  '.jpg': processJpgFolder,
+  '.jpeg': processJpgFolder,
   '.mp4': processMp4Folder,
   '.png': processPngFolder,
   '.webp': processWebpFolder,
