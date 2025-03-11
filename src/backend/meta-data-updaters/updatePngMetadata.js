@@ -5,7 +5,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 const extractChunks = require('png-chunks-extract');
 const encodeChunks = require('png-chunks-encode');
-const { log } = require('../logging/logUtils');
+const { log } = require('../utils/logUtils');
 
 // Log file setup
 const LOG_DIR = path.join(__dirname, '..', '..', '..', 'logs');

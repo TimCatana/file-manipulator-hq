@@ -3,7 +3,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { log } = require('../logging/logUtils');
+const { log } = require('../utils/logUtils');
 
 // Log file setup
 const LOG_DIR = path.join(__dirname, '..', '..', '..', 'logs');

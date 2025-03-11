@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { log } = require('../backend/logging/logUtils');
+const { log } = require('../backend/utils/logUtils');
 
 async function sortFilesByExtension(inputDir, outputDir) {
   const failed = [];

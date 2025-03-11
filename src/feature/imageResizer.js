@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
 const prompts = require('prompts');
-const { log } = require('../backend/logging/logUtils');
+const { log } = require('../backend/utils/logUtils');
 
 // Supported image extensions
 const SUPPORTED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];

@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { log } = require('../backend/logging/logUtils');
+const { log } = require('../backend/utils/logUtils');
 
 // Rename files in the directory with a base name and index
 async function renameFiles(inputDir, fileNameBase) {

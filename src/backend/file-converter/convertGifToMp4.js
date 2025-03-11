@@ -3,7 +3,7 @@
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { log } = require('../logging/logUtils');
+const { log } = require('../utils/logUtils');
 
 async function convertGifToMp4(inputFile, outputFile) {
   log('DEBUG', `Converting GIF to MP4: ${inputFile}`);

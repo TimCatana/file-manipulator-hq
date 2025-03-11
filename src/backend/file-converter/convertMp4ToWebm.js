@@ -3,7 +3,7 @@
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { log } = require('../logging/logUtils');
+const { log } = require('../utils/logUtils');
 
 async function convertMp4ToWebm(inputFile, outputFile) {
   log('DEBUG', `Converting MP4 to WebM: ${inputFile}`);

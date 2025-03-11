@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { log } = require('../backend/logging/logUtils');
+const { log } = require('../backend/utils/logUtils');
 const { convertPngToWebp } = require('../backend/file-converter/convertPngToWebp');
 const { convertPngToJpg } = require('../backend/file-converter/convertPngToJpg');
 const { convertJpgToWebp } = require('../backend/file-converter/convertJpgToWebp');

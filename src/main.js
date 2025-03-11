@@ -3,7 +3,7 @@
 const prompts = require('prompts');
 const path = require('path');
 const fs = require('fs');
-const { log, setupConsoleLogging } = require('./backend/logging/logUtils');
+const { log, setupConsoleLogging } = require('./backend/utils/logUtils');
 const { updateMetadata } = require('./feature/metaDataUpdater');
 const { resizeImages } = require('./feature/imageResizer');
 const { sortFilesByExtension } = require('./feature/fileSorter');
