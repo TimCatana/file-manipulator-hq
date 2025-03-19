@@ -42,8 +42,8 @@ function checkFFmpeg() {
   }
 }
 
-// Function to update metadata for a single MP4 file
-async function processMp4Folder(inputFile, outputFile, metadata) {
+// Function to update metadata for a single WAV file
+async function processWavFolder(inputFile, outputFile, metadata) {
   if (!checkExifTool() || !checkFFmpeg()) {
     throw new Error('Required tools (ExifTool or FFmpeg) not installed');
   }
@@ -67,21 +67,20 @@ async function processMp4Folder(inputFile, outputFile, metadata) {
           `-metadata copyright="${copyright}"`,
           `-metadata genre="${genre}"`,
           `-metadata keywords="${keywords}"`,
-          `-metadata creation_time="${currentDateTime}"`, // Sets creation time in MP4 metadata
-          '-c:v copy', // No video re-encoding
+          `-metadata date="${currentDateTime}"`,
           '-c:a copy', // No audio re-encoding
         ])
         .save(outputFile)
         .on('end', () => {
           log('INFO', `Success: Metadata updated for ${outputFile}`);
 
-          // Update additional timestamps with ExifTool to match PNG behavior
+          // Update timestamps with ExifTool
           try {
             execSync(
               `exiftool -ModifyDate="${currentDateTime}" -DateTimeOriginal="${currentDateTime}" -CreateDate="${currentDateTime}" -FileCreateDate="${currentDateTime}" -FileModifyDate="${currentDateTime}" -overwrite_original "${outputFile}"`,
-              { stdio: 'ignore' } // Suppress ExifTool output
+              { stdio: 'ignore' }
             );
-            log('INFO', `Success: File timestamps (ModifyDate, DateTimeOriginal, CreateDate, FileCreateDate, FileModifyDate) updated for ${outputFile}`);
+            log('INFO', `Success: File timestamps updated for ${outputFile}`);
             resolve();
           } catch (exifError) {
             log('ERROR', `ExifTool error for ${outputFile}: ${exifError.message}`);
@@ -99,4 +98,4 @@ async function processMp4Folder(inputFile, outputFile, metadata) {
   });
 }
 
-module.exports = { processMp4Folder };
+module.exports = { processWavFolder };

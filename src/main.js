@@ -6,6 +6,7 @@ const fs = require('fs');
 const { log, setupConsoleLogging } = require('./backend/utils/logUtils');
 const { updateMetadata } = require('./feature/metaDataUpdater');
 const { resizeImages } = require('./feature/imageResizer');
+const { resizeVideos } = require('./feature/videoResizer'); // New import
 const { sortFilesByExtension } = require('./feature/fileSorter');
 const { renameFiles } = require('./feature/fileRenamer');
 const { convertFiles } = require('./feature/fileConverter');
@@ -20,6 +21,7 @@ const JSON_DIR = path.join(BASE_DIR, 'json');
 const LOG_DIR = path.join(BASE_DIR, 'logs');
 const UPDATED_METADATA_BASE_DIR = path.join(BIN_DIR, 'updated-metadata');
 const RESIZED_BASE_DIR = path.join(BIN_DIR, 'resized-images');
+const VIDEO_RESIZED_BASE_DIR = path.join(BIN_DIR, 'resized-videos'); // New directory for video resizing
 const SORTED_BASE_DIR = path.join(BIN_DIR, 'file-sorter');
 const CONVERTED_BASE_DIR = path.join(BIN_DIR, 'converted-files');
 
@@ -36,8 +38,9 @@ Options:
   -v, --version  Display version and exit
 
 Features:
-  - Meta Data Updater: Update metadata for files or folders (GIF, JPEG, MP4, PNG, WebP).
+  - Meta Data Updater: Update metadata for files or folders (GIF, JPEG, MP4, PNG, WebP, WAV).
   - Image Resizer: Resize images to specified dimensions (supports files or folders).
+  - Video Resizer: Resize videos to specified dimensions (supports files or folders).
   - File Sorter: Sort files in a directory by extension into subfolders (e.g., organized/png, organized/jpg).
   - File Renaming: Tools for renaming files (e.g., File Renamer).
   - File Converter: Convert file types (e.g., PNG to WebP, JPG to PNG) for a single file or directory.
@@ -49,8 +52,9 @@ Directories:
   - CSV: ${CSV_DIR}
   - JSON: ${JSON_DIR}
   - Logs: ${LOG_DIR}
-  - Updated Metadata: ${UPDATED_METADATA_BASE_DIR}/<timestamp>/{successful,failed}/{gif,jpeg,mp4,png,webp}
+  - Updated Metadata: ${UPDATED_METADATA_BASE_DIR}/<timestamp>/{successful,failed}/{gif,jpeg,mp4,png,webp,wav}
   - Resized Images: ${RESIZED_BASE_DIR}/<timestamp>
+  - Resized Videos: ${VIDEO_RESIZED_BASE_DIR}/<timestamp>
   - Sorted Files: ${SORTED_BASE_DIR}/<timestamp>/<input-folder-name>/organized
   - Converted Files: ${CONVERTED_BASE_DIR}/<timestamp>
   `;
@@ -69,6 +73,7 @@ async function ensureDirectories() {
     LOG_DIR,
     UPDATED_METADATA_BASE_DIR,
     RESIZED_BASE_DIR,
+    VIDEO_RESIZED_BASE_DIR, // Added new directory
     SORTED_BASE_DIR,
     CONVERTED_BASE_DIR,
   ];
@@ -177,6 +182,7 @@ async function promptForMetadata() {
         choices: [
           { title: 'Meta Data Updater', value: 'metadata' },
           { title: 'Image Resizer', value: 'resizer' },
+          { title: 'Video Resizer', value: 'videoResizer' }, // New option
           { title: 'File Sorter', value: 'sorter' },
           { title: 'File Renaming', value: 'renaming' },
           { title: 'File Converter', value: 'converter' },
@@ -216,7 +222,7 @@ async function promptForMetadata() {
         const outputDir = generateRunDir(UPDATED_METADATA_BASE_DIR);
         const successfulDir = path.join(outputDir, 'successful');
         const failedDir = path.join(outputDir, 'failed');
-        const types = ['gif', 'jpeg', 'mp4', 'png', 'webp'];
+        const types = ['gif', 'jpeg', 'mp4', 'png', 'webp', 'wav'];
         try {
           await Promise.all([
             ...types.map((type) => fs.promises.mkdir(path.join(successfulDir, type), { recursive: true })),
@@ -273,6 +279,45 @@ async function promptForMetadata() {
           log('INFO', `Output stored in: ${outputDir}`);
         } catch (err) {
           log('ERROR', `Image resizing failed: ${err.message}`);
+          log('INFO', `Partial output (if any) stored in: ${outputDir}`);
+        }
+      } else if (initialResponse.choice === 'videoResizer') {
+        log('DEBUG', 'Prompting for file or folder path (Video Resizer)');
+        const pathResponse = await prompts({
+          type: 'text',
+          name: 'path',
+          message: 'Enter the path to a video file or folder to resize (or press Enter to go back):',
+          validate: (value) => {
+            if (value.trim() === '') return true; // Empty input goes back
+            return fs.existsSync(value) ? true : 'Path not found. Please enter a valid path.';
+          },
+        });
+
+        if (!pathResponse.path || pathResponse.path.trim() === '') {
+          log('INFO', 'No path provided, returning to menu.');
+          continue;
+        }
+
+        const inputPath = path.resolve(pathResponse.path);
+        const isDirectory = fs.statSync(inputPath).isDirectory();
+        const outputDir = generateRunDir(VIDEO_RESIZED_BASE_DIR);
+
+        try {
+          log('INFO', `Resizing ${isDirectory ? 'folder' : 'video file'}: ${inputPath}`);
+          const result = await resizeVideos(inputPath, isDirectory, outputDir);
+
+          log('INFO', 'Video resizing completed.');
+          if (result.skipped.length > 0) {
+            log('INFO', 'Skipped files (unsupported formats):');
+            result.skipped.forEach((file) => log('INFO', `  - ${file}`));
+          }
+          if (result.failed.length > 0) {
+            log('INFO', 'Failed files (processing errors):');
+            result.failed.forEach(({ file, reason }) => log('INFO', `  - ${file}: ${reason}`));
+          }
+          log('INFO', `Output stored in: ${outputDir}`);
+        } catch (err) {
+          log('ERROR', `Video resizing failed: ${err.message}`);
           log('INFO', `Partial output (if any) stored in: ${outputDir}`);
         }
       } else if (initialResponse.choice === 'sorter') {

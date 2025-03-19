@@ -6,6 +6,7 @@ const { processJpgFolder } = require('../backend/meta-data-updaters/updateJpgMet
 const { processMp4Folder } = require('../backend/meta-data-updaters/updateMp4Metadata');
 const { processPngFolder } = require('../backend/meta-data-updaters/updatePngMetadata');
 const { processWebpFolder } = require('../backend/meta-data-updaters/updateWebpMetadata');
+const { processWavFolder } = require('../backend/meta-data-updaters/updateWavMetadata');
 
 // Map file extensions to their respective updater functions
 const metadataUpdaters = {
@@ -15,6 +16,7 @@ const metadataUpdaters = {
   '.mp4': processMp4Folder,
   '.png': processPngFolder,
   '.webp': processWebpFolder,
+  '.wav': processWavFolder,
 };
 
 // Generate a unique filename with timestamp
