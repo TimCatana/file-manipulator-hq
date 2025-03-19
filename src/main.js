@@ -4,79 +4,75 @@ const prompts = require('prompts');
 const path = require('path');
 const fs = require('fs');
 const { log, setupConsoleLogging } = require('./backend/utils/logUtils');
-const { updateMetadata } = require('./feature/metaDataUpdater');
-const { resizeImages } = require('./feature/imageResizer');
-const { resizeVideos } = require('./feature/videoResizer'); // New import
-const { sortFilesByExtension } = require('./feature/fileSorter');
-const { renameFiles } = require('./feature/fileRenamer');
-const { convertFiles } = require('./feature/fileConverter');
+// Update Metadata Imports
+const { updateGifMetadata } = require('./feature/update-metadata/updateGifMetadata');
+const { updateJpgMetadata } = require('./feature/update-metadata/updateJpgMetadata');
+const { updateMp4Metadata } = require('./feature/update-metadata/updateMp4Metadata');
+const { updatePngMetadata } = require('./feature/update-metadata/updatePngMetadata');
+const { updateWavMetadata } = require('./feature/update-metadata/updateWavMetadata');
+const { updateWebpMetadata } = require('./feature/update-metadata/updateWebpMetadata');
+// Convert File Type Imports
+const { convertGifToMp4 } = require('./feature/convert-file-type/convert-videos/convertGifToMp4');
+const { convertGifToWebm } = require('./feature/convert-file-type/convert-videos/convertGifToWebm');
+const { convertMp4ToGif } = require('./feature/convert-file-type/convert-videos/convertMp4ToGif');
+const { convertMp4ToWebm } = require('./feature/convert-file-type/convert-videos/convertMp4ToWebm');
+const { convertWebmToGif } = require('./feature/convert-file-type/convert-videos/convertWebmToGif');
+const { convertWebmToMp4 } = require('./feature/convert-file-type/convert-videos/convertWebmToMp4');
+const { convertJpgToPng } = require('./feature/convert-file-type/convert-images/convertJpgToPng');
+const { convertJpgToWebp } = require('./feature/convert-file-type/convert-images/convertJpgToWebp');
+const { convertPngToJpg } = require('./feature/convert-file-type/convert-images/convertPngToJpg');
+const { convertPngToWebp } = require('./feature/convert-file-type/convert-images/convertPngToWebp');
+const { convertWebpToJpg } = require('./feature/convert-file-type/convert-images/convertWebpToJpg');
+const { convertWebpToPng } = require('./feature/convert-file-type/convert-images/convertWebpToPng');
+// Resize Files Imports
+const { resizeImages } = require('./feature/resize-files/resizeImages');
+const { resizeVideos } = require('./feature/resize-files/resizeVideos');
+// Rename Files Import
+const { renameFiles } = require('./feature/rename-files/renameFiles');
+// Sort Files Imports
+const { sortFilesByExtension } = require('./feature/sort-files/sortFilesByExtension');
+const { sortFilesByType } = require('./feature/sort-files/sortFilesByType');
 
 // Configuration
 const BASE_DIR = path.join(__dirname, '..');
 const BIN_DIR = path.join(BASE_DIR, 'bin');
-const IMG_DIR = path.join(BIN_DIR, 'img');
-const VID_DIR = path.join(BIN_DIR, 'vid');
-const CSV_DIR = path.join(BIN_DIR, 'csv');
 const JSON_DIR = path.join(BASE_DIR, 'json');
 const LOG_DIR = path.join(BASE_DIR, 'logs');
-const UPDATED_METADATA_BASE_DIR = path.join(BIN_DIR, 'updated-metadata');
-const RESIZED_BASE_DIR = path.join(BIN_DIR, 'resized-images');
-const VIDEO_RESIZED_BASE_DIR = path.join(BIN_DIR, 'resized-videos'); // New directory for video resizing
-const SORTED_BASE_DIR = path.join(BIN_DIR, 'file-sorter');
-const CONVERTED_BASE_DIR = path.join(BIN_DIR, 'converted-files');
 
 // Help message
 function displayHelp() {
   const helpText = `
-main.js - File manipulation console application.
+main.js - Metadata Update, File Conversion, Resize, Rename & Sort Console Application
 
 Usage:
-  node main.js [--help]
+  node src/main.js [--help]
 
 Options:
-  --help  Display this help and exit
-  -v, --version  Display version and exit
+  --help        Display this help and exit
+  -v, --version Display version and exit
 
 Features:
-  - Meta Data Updater: Update metadata for files or folders (GIF, JPEG, MP4, PNG, WebP, WAV).
-  - Image Resizer: Resize images to specified dimensions (supports files or folders).
-  - Video Resizer: Resize videos to specified dimensions (supports files or folders).
-  - File Sorter: Sort files in a directory by extension into subfolders (e.g., organized/png, organized/jpg).
-  - File Renaming: Tools for renaming files (e.g., File Renamer).
-  - File Converter: Convert file types (e.g., PNG to WebP, JPG to PNG) for a single file or directory.
+  - Update Metadata: GIF, JPG, MP4, PNG, WAV, WebP
+  - Convert File Type:
+    - Videos: GIF to MP4/WebM, MP4 to GIF/WebM, WebM to GIF/MP4
+    - Images: JPG to PNG/WebP, PNG to JPG/WebP, WebP to JPG/PNG
+  - Resize Files: Images, Videos
+  - Rename Files
+  - Sort Files:
+    - Sort Files By Extension
+    - Sort Files By Type (Video & Images)
 
 Directories:
   - Bin: ${BIN_DIR}
-  - Images: ${IMG_DIR}
-  - Videos: ${VID_DIR}
-  - CSV: ${CSV_DIR}
   - JSON: ${JSON_DIR}
   - Logs: ${LOG_DIR}
-  - Updated Metadata: ${UPDATED_METADATA_BASE_DIR}/<timestamp>/{successful,failed}/{gif,jpeg,mp4,png,webp,wav}
-  - Resized Images: ${RESIZED_BASE_DIR}/<timestamp>
-  - Resized Videos: ${VIDEO_RESIZED_BASE_DIR}/<timestamp>
-  - Sorted Files: ${SORTED_BASE_DIR}/<timestamp>/<input-folder-name>/organized
-  - Converted Files: ${CONVERTED_BASE_DIR}/<timestamp>
   `;
   log('INFO', helpText);
-  process.exit(0);
 }
 
 // Ensure base directories exist
 async function ensureDirectories() {
-  const dirs = [
-    BIN_DIR,
-    IMG_DIR,
-    VID_DIR,
-    CSV_DIR,
-    JSON_DIR,
-    LOG_DIR,
-    UPDATED_METADATA_BASE_DIR,
-    RESIZED_BASE_DIR,
-    VIDEO_RESIZED_BASE_DIR, // Added new directory
-    SORTED_BASE_DIR,
-    CONVERTED_BASE_DIR,
-  ];
+  const dirs = [BIN_DIR, JSON_DIR, LOG_DIR];
   try {
     await Promise.all(
       dirs.map((dir) => fs.promises.mkdir(dir, { recursive: true }))
@@ -87,445 +83,300 @@ async function ensureDirectories() {
   }
 }
 
-// Generate a unique output directory for each feature run
-function generateRunDir(baseDir) {
-  const timestamp = new Date().toISOString().replace(/[-:.T]/g, '').slice(0, 14); // e.g., 20250310123456
-  const runDir = path.join(baseDir, timestamp);
-  try {
-    fs.mkdirSync(runDir, { recursive: true });
-    log('INFO', `Created output directory: ${runDir}`);
-  } catch (err) {
-    log('ERROR', `Failed to create output directory ${runDir}: ${err.message}`);
-  }
-  return runDir;
-}
-
-// Prompt for metadata with explicit back option
-async function promptForMetadata() {
-  const questions = [
-    {
-      type: 'text',
-      name: 'title',
-      message: 'Enter the title for the metadata (or press Enter to go back):',
-      initial: 'Default Title',
-      validate: (value) => (value.trim() !== '' ? true : 'back'),
-    },
-    {
-      type: (prev) => (prev !== 'back' ? 'text' : null),
-      name: 'description',
-      message: 'Enter the description for the metadata (or press Enter to go back):',
-      initial: 'Default description',
-      validate: (value) => (value.trim() !== '' ? true : 'back'),
-    },
-    {
-      type: (prev) => (prev !== 'back' ? 'text' : null),
-      name: 'keywords',
-      message: 'Enter keywords (comma-separated, or press Enter to go back):',
-      initial: 'default, keywords',
-      validate: (value) => (value.trim() !== '' ? true : 'back'),
-    },
-    {
-      type: (prev) => (prev !== 'back' ? 'text' : null),
-      name: 'copyright',
-      message: 'Enter copyright notice (or press Enter to go back):',
-      initial: '© 2025 YourName',
-      validate: (value) => (value.trim() !== '' ? true : 'back'),
-    },
-    {
-      type: (prev) => (prev !== 'back' ? 'text' : null),
-      name: 'genre',
-      message: 'Enter genre (or press Enter to go back):',
-      initial: 'General',
-      validate: (value) => (value.trim() !== '' ? true : 'back'),
-    },
-    {
-      type: (prev) => (prev !== 'back' ? 'text' : null),
-      name: 'comment',
-      message: 'Enter comment (or press Enter to go back):',
-      initial: 'Default comment',
-      validate: (value) => (value.trim() !== '' ? true : 'back'),
-    },
-  ];
-
-  const response = await prompts(questions, {
-    onCancel: () => ({ title: 'back' }),
-  });
-  if (response.title === 'back' || Object.values(response).some((val) => val === 'back')) {
-    log('INFO', 'Metadata input cancelled, returning to menu.');
-    return null;
-  }
-  return response;
-}
-
 // Main execution
 (async () => {
-  try {
-    setupConsoleLogging();
-    log('DEBUG', 'Starting main execution');
+  setupConsoleLogging();
+  log('DEBUG', 'Starting main execution');
 
-    const args = process.argv.slice(2);
-    if (args.includes('--help')) return displayHelp();
-    if (args.includes('-v') || args.includes('--version')) {
-      log('INFO', 'File Manipulation App v1.0.0');
+  const args = process.argv.slice(2);
+  if (args.includes('--help')) {
+    displayHelp();
+    return;
+  }
+  if (args.includes('-v') || args.includes('--version')) {
+    log('INFO', 'Metadata Update, File Conversion, Resize, Rename & Sort Console App v1.0.0');
+    return;
+  }
+
+  log('DEBUG', 'Ensuring directories');
+  await ensureDirectories();
+
+  async function mainMenu() {
+    log('DEBUG', 'Prompting for initial selection');
+    const initialResponse = await prompts({
+      type: 'select',
+      name: 'choice',
+      message: 'Choose an option:',
+      choices: [
+        { title: 'Update Metadata', value: 'updateMetadata' },
+        { title: 'Convert File Type', value: 'convertFileType' },
+        { title: 'Resize Files', value: 'resizeFiles' },
+        { title: 'Rename Files', value: 'renameFiles' },
+        { title: 'Sort Files', value: 'sortFiles' },
+        { title: 'Exit', value: 'exit' },
+      ],
+      initial: 0,
+    });
+
+    if (!initialResponse.choice || initialResponse.choice === 'exit') {
+      log('INFO', 'Exiting application.');
       process.exit(0);
     }
 
-    log('DEBUG', 'Ensuring directories');
-    await ensureDirectories();
-
-    while (true) {
-      log('DEBUG', 'Prompting for initial selection');
-      const initialResponse = await prompts({
-        type: 'select',
-        name: 'choice',
-        message: 'Choose an option:',
-        choices: [
-          { title: 'Meta Data Updater', value: 'metadata' },
-          { title: 'Image Resizer', value: 'resizer' },
-          { title: 'Video Resizer', value: 'videoResizer' }, // New option
-          { title: 'File Sorter', value: 'sorter' },
-          { title: 'File Renaming', value: 'renaming' },
-          { title: 'File Converter', value: 'converter' },
-          { title: 'Exit', value: 'exit' },
-        ],
-        initial: 0,
-      });
-
-      if (!initialResponse.choice || initialResponse.choice === 'exit') {
-        log('INFO', 'Exiting application.');
-        process.exit(0);
-      }
-
-      if (initialResponse.choice === 'metadata') {
-        log('DEBUG', 'Prompting for file or folder path (Metadata Updater)');
-        const pathResponse = await prompts({
-          type: 'text',
-          name: 'path',
-          message: 'Enter the path to a file or folder for metadata update (or press Enter to go back):',
-          validate: (value) => {
-            if (value.trim() === '') return true; // Empty input goes back
-            return fs.existsSync(value) ? true : 'Path not found. Please enter a valid path.';
-          },
-        });
-
-        if (!pathResponse.path || pathResponse.path.trim() === '') {
-          log('INFO', 'No path provided, returning to menu.');
-          continue;
-        }
-
-        const inputPath = path.resolve(pathResponse.path);
-        const isDirectory = fs.statSync(inputPath).isDirectory();
-        const metadata = await promptForMetadata();
-
-        if (!metadata) continue;
-
-        const outputDir = generateRunDir(UPDATED_METADATA_BASE_DIR);
-        const successfulDir = path.join(outputDir, 'successful');
-        const failedDir = path.join(outputDir, 'failed');
-        const types = ['gif', 'jpeg', 'mp4', 'png', 'webp', 'wav'];
-        try {
-          await Promise.all([
-            ...types.map((type) => fs.promises.mkdir(path.join(successfulDir, type), { recursive: true })),
-            ...types.map((type) => fs.promises.mkdir(path.join(failedDir, type), { recursive: true })),
-          ]);
-
-          log('INFO', `Updating metadata for ${isDirectory ? 'folder' : 'file'}: ${inputPath}`);
-          const result = await updateMetadata(inputPath, isDirectory, metadata, successfulDir, failedDir);
-
-          log('INFO', 'Metadata update completed.');
-          if (result.skipped.length > 0) {
-            log('INFO', 'Skipped files (unsupported extensions):');
-            result.skipped.forEach((file) => log('INFO', `  - ${file}`));
-          }
-          log('INFO', `Output stored in: ${outputDir}`);
-        } catch (err) {
-          log('ERROR', `Metadata update failed: ${err.message}`);
-          log('INFO', `Partial output (if any) stored in: ${outputDir}`);
-        }
-      } else if (initialResponse.choice === 'resizer') {
-        log('DEBUG', 'Prompting for file or folder path (Image Resizer)');
-        const pathResponse = await prompts({
-          type: 'text',
-          name: 'path',
-          message: 'Enter the path to a file or folder to resize (or press Enter to go back):',
-          validate: (value) => {
-            if (value.trim() === '') return true; // Empty input goes back
-            return fs.existsSync(value) ? true : 'Path not found. Please enter a valid path.';
-          },
-        });
-
-        if (!pathResponse.path || pathResponse.path.trim() === '') {
-          log('INFO', 'No path provided, returning to menu.');
-          continue;
-        }
-
-        const inputPath = path.resolve(pathResponse.path);
-        const isDirectory = fs.statSync(inputPath).isDirectory();
-        const outputDir = generateRunDir(RESIZED_BASE_DIR);
-
-        try {
-          log('INFO', `Resizing ${isDirectory ? 'folder' : 'file'}: ${inputPath}`);
-          const result = await resizeImages(inputPath, isDirectory, outputDir);
-
-          log('INFO', 'Image resizing completed.');
-          if (result.skipped.length > 0) {
-            log('INFO', 'Skipped files (unsupported extensions):');
-            result.skipped.forEach((file) => log('INFO', `  - ${file}`));
-          }
-          if (result.failed.length > 0) {
-            log('INFO', 'Failed files (processing errors):');
-            result.failed.forEach(({ file, reason }) => log('INFO', `  - ${file}: ${reason}`));
-          }
-          log('INFO', `Output stored in: ${outputDir}`);
-        } catch (err) {
-          log('ERROR', `Image resizing failed: ${err.message}`);
-          log('INFO', `Partial output (if any) stored in: ${outputDir}`);
-        }
-      } else if (initialResponse.choice === 'videoResizer') {
-        log('DEBUG', 'Prompting for file or folder path (Video Resizer)');
-        const pathResponse = await prompts({
-          type: 'text',
-          name: 'path',
-          message: 'Enter the path to a video file or folder to resize (or press Enter to go back):',
-          validate: (value) => {
-            if (value.trim() === '') return true; // Empty input goes back
-            return fs.existsSync(value) ? true : 'Path not found. Please enter a valid path.';
-          },
-        });
-
-        if (!pathResponse.path || pathResponse.path.trim() === '') {
-          log('INFO', 'No path provided, returning to menu.');
-          continue;
-        }
-
-        const inputPath = path.resolve(pathResponse.path);
-        const isDirectory = fs.statSync(inputPath).isDirectory();
-        const outputDir = generateRunDir(VIDEO_RESIZED_BASE_DIR);
-
-        try {
-          log('INFO', `Resizing ${isDirectory ? 'folder' : 'video file'}: ${inputPath}`);
-          const result = await resizeVideos(inputPath, isDirectory, outputDir);
-
-          log('INFO', 'Video resizing completed.');
-          if (result.skipped.length > 0) {
-            log('INFO', 'Skipped files (unsupported formats):');
-            result.skipped.forEach((file) => log('INFO', `  - ${file}`));
-          }
-          if (result.failed.length > 0) {
-            log('INFO', 'Failed files (processing errors):');
-            result.failed.forEach(({ file, reason }) => log('INFO', `  - ${file}: ${reason}`));
-          }
-          log('INFO', `Output stored in: ${outputDir}`);
-        } catch (err) {
-          log('ERROR', `Video resizing failed: ${err.message}`);
-          log('INFO', `Partial output (if any) stored in: ${outputDir}`);
-        }
-      } else if (initialResponse.choice === 'sorter') {
-        log('DEBUG', 'Prompting for directory path (File Sorter)');
-        const pathResponse = await prompts({
-          type: 'text',
-          name: 'path',
-          message: 'Enter the directory path to sort files by extension (or press Enter to go back):',
-          validate: (value) => {
-            if (value.trim() === '') return true; // Empty input goes back
-            return fs.existsSync(value) && fs.statSync(value).isDirectory()
-              ? true
-              : 'Path must be a valid directory. Please enter a valid path.';
-          },
-        });
-
-        if (!pathResponse.path || pathResponse.path.trim() === '') {
-          log('INFO', 'No path provided, returning to menu.');
-          continue;
-        }
-
-        const inputDir = path.resolve(pathResponse.path);
-        const inputFolderName = path.basename(inputDir);
-        const runDir = generateRunDir(SORTED_BASE_DIR);
-        const outputDir = path.join(runDir, inputFolderName, 'organized');
-        try {
-          await fs.promises.mkdir(outputDir, { recursive: true });
-
-          log('INFO', `Sorting files from directory: ${inputDir}`);
-          const result = await sortFilesByExtension(inputDir, outputDir);
-
-          log('INFO', 'File sorting completed.');
-          if (result.skipped.length > 0) {
-            log('INFO', 'Skipped files (unsupported extensions):');
-            result.skipped.forEach((file) => log('INFO', `  - ${file}`));
-          }
-          log('INFO', `Output stored in: ${outputDir}`);
-        } catch (err) {
-          log('ERROR', `File sorting failed: ${err.message}`);
-          log('INFO', `Partial output (if any) stored in: ${outputDir}`);
-        }
-      } else if (initialResponse.choice === 'renaming') {
-        log('DEBUG', 'Prompting for File Renaming Tools selection');
-        const toolResponse = await prompts({
-          type: 'select',
-          name: 'tool',
-          message: 'Choose a File Renaming Tool:',
-          choices: [
-            { title: 'File Renamer', value: 'renamer' },
-            { title: 'Back', value: 'back' },
-          ],
-          initial: 0,
-        });
-
-        if (!toolResponse.tool || toolResponse.tool === 'back') {
-          log('INFO', 'Returning to main menu.');
-          continue;
-        }
-
-        if (toolResponse.tool === 'renamer') {
-          log('DEBUG', 'Prompting for directory and base filename (File Renamer)');
-          const renameResponse = await prompts([
-            {
-              type: 'text',
-              name: 'dir',
-              message: 'Enter the directory path to rename files (or press Enter to go back):',
-              validate: (value) => {
-                if (value.trim() === '') return true; // Empty input goes back
-                return fs.existsSync(value) && fs.statSync(value).isDirectory()
-                  ? true
-                  : 'Path must be a valid directory. Please enter a valid path.';
-              },
-            },
-            {
-              type: (prev) => (prev && prev.trim() !== '' ? 'text' : null),
-              name: 'baseName',
-              message: 'Enter the base filename (e.g., "image" for image-1.jpg, or press Enter to go back):',
-              validate: (value) => (value.trim() !== '' ? true : 'back'),
-            },
-          ]);
-
-          if (!renameResponse.dir || renameResponse.dir.trim() === '' || renameResponse.baseName === 'back') {
-            log('INFO', 'No directory or base name provided, returning to menu.');
-            continue;
-          }
-
-          const inputDir = path.resolve(renameResponse.dir);
-          const baseName = renameResponse.baseName;
-
-          try {
-            log('INFO', `Renaming files in directory: ${inputDir} with base name: ${baseName}`);
-            const result = await renameFiles(inputDir, baseName);
-
-            log('INFO', 'File renaming completed.');
-            if (result.failed.length > 0) {
-              log('INFO', 'Failed files:');
-              result.failed.forEach(({ file, reason }) => log('INFO', `  - ${file}: ${reason}`));
-            }
-            log('INFO', `Output stored in: ${inputDir}`);
-          } catch (err) {
-            log('ERROR', `File renaming failed: ${err.message}`);
-            log('INFO', `Partial output (if any) stored in: ${inputDir}`);
-          }
-        }
-      } else if (initialResponse.choice === 'converter') {
-        log('DEBUG', 'Prompting for conversion type (File Converter)');
-        const conversionResponse = await prompts({
-          type: 'select',
-          name: 'conversionType',
-          message: 'Choose conversion type:',
-          choices: [
-            { title: 'PNG to WebP', value: 'pngToWebp' },
-            { title: 'PNG to JPG', value: 'pngToJpg' },
-            { title: 'JPG to WebP', value: 'jpgToWebp' },
-            { title: 'JPG to PNG', value: 'jpgToPng' },
-            { title: 'WebP to PNG', value: 'webpToPng' },
-            { title: 'WebP to JPG', value: 'webpToJpg' },
-            { title: 'WebM to GIF', value: 'webmToGif' },
-            { title: 'WebM to MP4', value: 'webmToMp4' },
-            { title: 'GIF to MP4', value: 'gifToMp4' },
-            { title: 'GIF to WebM', value: 'gifToWebm' },
-            { title: 'MP4 to WebM', value: 'mp4ToWebm' },
-            { title: 'MP4 to GIF', value: 'mp4ToGif' },
-            { title: 'Back', value: 'back' },
-          ],
-          initial: 0,
-        });
-
-        if (!conversionResponse.conversionType || conversionResponse.conversionType === 'back') {
-          log('INFO', 'No conversion type provided, returning to menu.');
-          continue;
-        }
-
-        const conversionType = conversionResponse.conversionType;
-
-        log('DEBUG', 'Prompting for conversion scope (single file or directory)');
-        const scopeResponse = await prompts({
-          type: 'select',
-          name: 'scope',
-          message: 'Convert a single file or a directory?',
-          choices: [
-            { title: 'Single File', value: 'file' },
-            { title: 'Directory', value: 'directory' },
-            { title: 'Back', value: 'back' },
-          ],
-          initial: 0,
-        });
-
-        if (!scopeResponse.scope || scopeResponse.scope === 'back') {
-          log('INFO', 'No scope provided, returning to previous menu.');
-          continue;
-        }
-
-        const scopePrompt = scopeResponse.scope === 'file' 
-          ? {
-              type: 'text',
-              name: 'path',
-              message: `Enter the file path to convert to ${conversionType.split('To')[1]} (or press Enter to go back):`,
-              validate: (value) => {
-                if (value.trim() === '') return true; // Empty input goes back
-                return fs.existsSync(value) && fs.statSync(value).isFile()
-                  ? true
-                  : 'Path must be a valid file. Please enter a valid path.';
-              },
-            }
-          : {
-              type: 'text',
-              name: 'path',
-              message: `Enter the directory path to convert files to ${conversionType.split('To')[1]} (or press Enter to go back):`,
-              validate: (value) => {
-                if (value.trim() === '') return true; // Empty input goes back
-                return fs.existsSync(value) && fs.statSync(value).isDirectory()
-                  ? true
-                  : 'Path must be a valid directory. Please enter a valid path.';
-              },
-            };
-
-        const pathResponse = await prompts(scopePrompt);
-
-        if (!pathResponse.path || pathResponse.path.trim() === '') {
-          log('INFO', 'No path provided, returning to previous menu.');
-          continue;
-        }
-
-        const inputPath = path.resolve(pathResponse.path);
-        const isDirectory = scopeResponse.scope === 'directory';
-        const outputDir = generateRunDir(CONVERTED_BASE_DIR);
-
-        try {
-          log('INFO', `Converting ${isDirectory ? 'directory' : 'file'} at ${inputPath} to ${conversionType}`);
-          const result = await convertFiles(inputPath, conversionType, isDirectory, outputDir);
-
-          log('INFO', 'File conversion completed.');
-          if (result.failed.length > 0) {
-            log('INFO', 'Failed files:');
-            result.failed.forEach(({ file, reason }) => log('INFO', `  - ${file}: ${reason}`));
-          }
-          log('INFO', `Output stored in: ${outputDir}`);
-        } catch (err) {
-          log('ERROR', `File conversion failed: ${err.message}`);
-          log('INFO', `Partial output (if any) stored in: ${outputDir}`);
-        }
-      }
-
-      log('INFO', 'Task completed. Returning to menu.');
+    switch (initialResponse.choice) {
+      case 'updateMetadata':
+        await metadataMenu();
+        break;
+      case 'convertFileType':
+        await convertMenu();
+        break;
+      case 'resizeFiles':
+        await resizeMenu();
+        break;
+      case 'renameFiles':
+        const renameResult = await renameFiles();
+        if (renameResult === 'cancelled') log('INFO', 'Rename cancelled by user.');
+        else if (renameResult === 'success') log('INFO', 'Rename completed successfully.');
+        else log('INFO', 'Rename failed.');
+        break;
+      case 'sortFiles':
+        await sortMenu();
+        break;
     }
-  } catch (err) {
-    log('ERROR', `Unexpected error in main execution: ${err.message}`);
-    log('INFO', 'Continuing to main menu despite error.');
+
+    await mainMenu();
   }
+
+  async function metadataMenu() {
+    log('DEBUG', 'Prompting for metadata update selection');
+    const metadataResponse = await prompts({
+      type: 'select',
+      name: 'metadataType',
+      message: 'Choose a metadata update type:',
+      choices: [
+        { title: 'Update GIF Metadata', value: 'gif' },
+        { title: 'Update JPG Metadata', value: 'jpg' },
+        { title: 'Update MP4 Metadata', value: 'mp4' },
+        { title: 'Update PNG Metadata', value: 'png' },
+        { title: 'Update WAV Metadata', value: 'wav' },
+        { title: 'Update WebP Metadata', value: 'webp' },
+        { title: 'Back', value: 'back' },
+      ],
+      initial: 0,
+    });
+
+    if (!metadataResponse.metadataType || metadataResponse.metadataType === 'back') {
+      log('INFO', 'Returning to main menu.');
+      return;
+    }
+
+    let result;
+    switch (metadataResponse.metadataType) {
+      case 'gif': result = await updateGifMetadata(); break;
+      case 'jpg': result = await updateJpgMetadata(); break;
+      case 'mp4': result = await updateMp4Metadata(); break;
+      case 'png': result = await updatePngMetadata(); break;
+      case 'wav': result = await updateWavMetadata(); break;
+      case 'webp': result = await updateWebpMetadata(); break;
+      default: log('WARN', 'Invalid metadata type selected.'); result = 'error';
+    }
+
+    if (result === 'cancelled') log('INFO', 'Metadata update cancelled by user.');
+    else if (result === 'success') log('INFO', 'Metadata update completed successfully.');
+    else log('INFO', 'Metadata update failed.');
+
+    await metadataMenu();
+  }
+
+  async function convertMenu() {
+    log('DEBUG', 'Prompting for conversion type selection');
+    const convertResponse = await prompts({
+      type: 'select',
+      name: 'convertType',
+      message: 'Choose a conversion type:',
+      choices: [
+        { title: 'Convert Videos', value: 'videos' },
+        { title: 'Convert Images', value: 'images' },
+        { title: 'Back', value: 'back' },
+      ],
+      initial: 0,
+    });
+
+    if (!convertResponse.convertType || convertResponse.convertType === 'back') {
+      log('INFO', 'Returning to main menu.');
+      return;
+    }
+
+    if (convertResponse.convertType === 'videos') {
+      await videoConvertMenu();
+    } else if (convertResponse.convertType === 'images') {
+      await imageConvertMenu();
+    }
+
+    await convertMenu();
+  }
+
+  async function videoConvertMenu() {
+    const videoResponse = await prompts({
+      type: 'select',
+      name: 'conversion',
+      message: 'Choose a video conversion:',
+      choices: [
+        { title: 'GIF to MP4', value: 'gifToMp4' },
+        { title: 'GIF to WebM', value: 'gifToWebm' },
+        { title: 'MP4 to GIF', value: 'mp4ToGif' },
+        { title: 'MP4 to WebM', value: 'mp4ToWebm' },
+        { title: 'WebM to GIF', value: 'webmToGif' },
+        { title: 'WebM to MP4', value: 'webmToMp4' },
+        { title: 'Back', value: 'back' },
+      ],
+      initial: 0,
+    });
+
+    if (!videoResponse.conversion || videoResponse.conversion === 'back') {
+      log('INFO', 'Returning to conversion type menu.');
+      return;
+    }
+
+    let result;
+    switch (videoResponse.conversion) {
+      case 'gifToMp4': result = await convertGifToMp4(); break;
+      case 'gifToWebm': result = await convertGifToWebm(); break;
+      case 'mp4ToGif': result = await convertMp4ToGif(); break;
+      case 'mp4ToWebm': result = await convertMp4ToWebm(); break;
+      case 'webmToGif': result = await convertWebmToGif(); break;
+      case 'webmToMp4': result = await convertWebmToMp4(); break;
+      default: log('WARN', 'Invalid video conversion selected.'); result = 'error';
+    }
+
+    if (result === 'cancelled') log('INFO', 'Video conversion cancelled by user.');
+    else if (result === 'success') log('INFO', 'Video conversion completed successfully.');
+    else log('INFO', 'Video conversion failed.');
+
+    await videoConvertMenu();
+  }
+
+  async function imageConvertMenu() {
+    const imageResponse = await prompts({
+      type: 'select',
+      name: 'conversion',
+      message: 'Choose an image conversion:',
+      choices: [
+        { title: 'JPG to PNG', value: 'jpgToPng' },
+        { title: 'JPG to WebP', value: 'jpgToWebp' },
+        { title: 'PNG to JPG', value: 'pngToJpg' },
+        { title: 'PNG to WebP', value: 'pngToWebp' },
+        { title: 'WebP to JPG', value: 'webpToJpg' },
+        { title: 'WebP to PNG', value: 'webpToPng' },
+        { title: 'Back', value: 'back' },
+      ],
+      initial: 0,
+    });
+
+    if (!imageResponse.conversion || imageResponse.conversion === 'back') {
+      log('INFO', 'Returning to conversion type menu.');
+      return;
+    }
+
+    let result;
+    switch (imageResponse.conversion) {
+      case 'jpgToPng': result = await convertJpgToPng(); break;
+      case 'jpgToWebp': result = await convertJpgToWebp(); break;
+      case 'pngToJpg': result = await convertPngToJpg(); break;
+      case 'pngToWebp': result = await convertPngToWebp(); break;
+      case 'webpToJpg': result = await convertWebpToJpg(); break;
+      case 'webpToPng': result = await convertWebpToPng(); break;
+      default: log('WARN', 'Invalid image conversion selected.'); result = 'error';
+    }
+
+    if (result === 'cancelled') log('INFO', 'Image conversion cancelled by user.');
+    else if (result === 'success') log('INFO', 'Image conversion completed successfully.');
+    else log('INFO', 'Image conversion failed.');
+
+    await imageConvertMenu();
+  }
+
+  async function resizeMenu() {
+    log('DEBUG', 'Prompting for resize type selection');
+    const resizeResponse = await prompts({
+      type: 'select',
+      name: 'resizeType',
+      message: 'Choose a resize type:',
+      choices: [
+        { title: 'Resize Images', value: 'images' },
+        { title: 'Resize Videos', value: 'videos' },
+        { title: 'Back', value: 'back' },
+      ],
+      initial: 0,
+    });
+
+    if (!resizeResponse.resizeType || resizeResponse.resizeType === 'back') {
+      log('INFO', 'Returning to main menu.');
+      return;
+    }
+
+    let result;
+    switch (resizeResponse.resizeType) {
+      case 'images':
+        log('INFO', 'Starting Resize Images Feature');
+        result = await resizeImages();
+        break;
+      case 'videos':
+        log('INFO', 'Starting Resize Videos Feature');
+        result = await resizeVideos();
+        break;
+      default:
+        log('WARN', 'Invalid resize type selected.');
+        result = 'error';
+    }
+
+    if (result === 'cancelled') log('INFO', 'Resize cancelled by user.');
+    else if (result === 'success') log('INFO', 'Resize completed successfully.');
+    else log('INFO', 'Resize failed.');
+
+    await resizeMenu();
+  }
+
+  async function sortMenu() {
+    log('DEBUG', 'Prompting for sort type selection');
+    const sortResponse = await prompts({
+      type: 'select',
+      name: 'sortType',
+      message: 'Choose a sort type:',
+      choices: [
+        { title: 'Sort Files By Extension', value: 'byExtension' },
+        { title: 'Sort Files By Type (Video & Images)', value: 'byType' },
+        { title: 'Back', value: 'back' },
+      ],
+      initial: 0,
+    });
+
+    if (!sortResponse.sortType || sortResponse.sortType === 'back') {
+      log('INFO', 'Returning to main menu.');
+      return;
+    }
+
+    let result;
+    switch (sortResponse.sortType) {
+      case 'byExtension':
+        log('INFO', 'Starting Sort Files By Extension Feature');
+        result = await sortFilesByExtension();
+        break;
+      case 'byType':
+        log('INFO', 'Starting Sort Files By Type Feature');
+        result = await sortFilesByType();
+        break;
+      default:
+        log('WARN', 'Invalid sort type selected.');
+        result = 'error';
+    }
+
+    if (result === 'cancelled') log('INFO', 'Sort cancelled by user.');
+    else if (result === 'success') log('INFO', 'Sort completed successfully.');
+    else log('INFO', 'Sort failed.');
+
+    await sortMenu();
+  }
+
+  await mainMenu();
 })();
