@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 const prompts = require('prompts');
-const fs = require('fs').promises;
+const fs = require('fs'); // For existsSync
+const fsPromises = require('fs').promises; // For promise-based operations
 const path = require('path');
 const { execSync } = require('child_process');
 const extractChunks = require('png-chunks-extract');
@@ -107,7 +108,7 @@ function generateXMP(title, description, keywords, copyright, genre, comment) {
 
 async function processPngFile(inputFile, outputFile, metadata) {
   const currentDateTime = getCurrentDateTime();
-  const buffer = await fs.readFile(inputFile);
+  const buffer = await fsPromises.readFile(inputFile);
   let chunks = extractChunks(buffer);
   chunks = chunks.filter(chunk => !['tEXt', 'zTXt', 'iTXt'].includes(chunk.name));
   const idatIndex = chunks.findIndex(c => c.name === 'IDAT');
@@ -131,7 +132,7 @@ async function processPngFile(inputFile, outputFile, metadata) {
   chunks.splice(idatIndex, 0, ...newTextChunks, xmpChunk);
   const newBuffer = encodeChunks(chunks);
 
-  await fs.writeFile(outputFile, newBuffer);
+  await fsPromises.writeFile(outputFile, newBuffer);
   log('INFO', `Success: Metadata updated for ${outputFile}`);
 
   execSync(
@@ -182,8 +183,8 @@ async function updatePngMetadata() {
       { type: 'text', name: 'comment', message: 'Enter comment:', initial: '' }
     ]);
 
-    await fs.mkdir(outputDir, { recursive: true });
-    const stats = await fs.stat(inputPath);
+    await fsPromises.mkdir(outputDir, { recursive: true });
+    const stats = await fsPromises.stat(inputPath);
 
     if (stats.isFile()) {
       if (!inputPath.toLowerCase().endsWith('.png')) {
@@ -193,7 +194,7 @@ async function updatePngMetadata() {
       const outputFile = path.join(outputDir, path.basename(inputPath));
       await processPngFile(inputPath, outputFile, metadata);
     } else if (stats.isDirectory()) {
-      const files = await fs.readdir(inputPath);
+      const files = await fsPromises.readdir(inputPath);
       const pngFiles = files.filter(f => f.toLowerCase().endsWith('.png'));
       if (pngFiles.length === 0) {
         log('INFO', 'No PNG files found in the directory.');
