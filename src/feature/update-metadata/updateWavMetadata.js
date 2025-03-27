@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 const prompts = require('prompts');
-const fs = require('fs').promises;
+const fs = require('fs'); // Added for existsSync
+const fsPromises = require('fs').promises; // Renamed to avoid conflict
 const path = require('path');
 const { execSync } = require('child_process');
 const ffmpeg = require('fluent-ffmpeg');
@@ -118,8 +119,8 @@ async function updateWavMetadata() {
       { type: 'text', name: 'comment', message: 'Enter comment:', initial: '' }
     ]);
 
-    await fs.mkdir(outputDir, { recursive: true });
-    const stats = await fs.stat(inputPath);
+    await fsPromises.mkdir(outputDir, { recursive: true });
+    const stats = await fsPromises.stat(inputPath);
 
     if (stats.isFile()) {
       if (!inputPath.toLowerCase().endsWith('.wav')) {
@@ -129,7 +130,7 @@ async function updateWavMetadata() {
       const outputFile = path.join(outputDir, path.basename(inputPath));
       await processWavFile(inputPath, outputFile, metadata);
     } else if (stats.isDirectory()) {
-      const files = await fs.readdir(inputPath);
+      const files = await fsPromises.readdir(inputPath);
       const wavFiles = files.filter(f => f.toLowerCase().endsWith('.wav'));
       if (wavFiles.length === 0) {
         log('INFO', 'No WAV files found in the directory.');

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 const prompts = require('prompts');
-const fs = require('fs').promises;
+const fs = require('fs'); // Added for existsSync
+const fsPromises = require('fs').promises; // Renamed to avoid conflict
 const path = require('path');
 const { execSync } = require('child_process');
 const { log } = require('../../backend/utils/logUtils');
@@ -51,7 +52,7 @@ async function processWebpFile(inputFile, outputFile, metadata) {
     `"${outputFile}"`
   ].join(' ');
 
-  await fs.copyFile(inputFile, outputFile);
+  await fsPromises.copyFile(inputFile, outputFile);
   log('INFO', `Copied ${path.basename(inputFile)} to ${outputFile}`);
   execSync(command, { stdio: 'inherit' });
   log('INFO', `Success: Metadata updated for ${outputFile}`);
@@ -99,8 +100,8 @@ async function updateWebpMetadata() {
       { type: 'text', name: 'comment', message: 'Enter comment:', initial: '' }
     ]);
 
-    await fs.mkdir(outputDir, { recursive: true });
-    const stats = await fs.stat(inputPath);
+    await fsPromises.mkdir(outputDir, { recursive: true });
+    const stats = await fsPromises.stat(inputPath);
 
     if (stats.isFile()) {
       if (!inputPath.toLowerCase().endsWith('.webp')) {
@@ -110,7 +111,7 @@ async function updateWebpMetadata() {
       const outputFile = path.join(outputDir, path.basename(inputPath));
       await processWebpFile(inputPath, outputFile, metadata);
     } else if (stats.isDirectory()) {
-      const files = await fs.readdir(inputPath);
+      const files = await fsPromises.readdir(inputPath);
       const webpFiles = files.filter(f => f.toLowerCase().endsWith('.webp'));
       if (webpFiles.length === 0) {
         log('INFO', 'No WebP files found in the directory.');

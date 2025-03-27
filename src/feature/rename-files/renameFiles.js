@@ -13,7 +13,15 @@ async function renameFiles() {
       type: 'text',
       name: 'dir',
       message: 'Enter the directory containing files to rename (or press Enter to cancel):',
-      validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Directory not found.'
+      validate: async (value) => {
+        if (value.trim() === '') return true;
+        try {
+          await fs.access(value);
+          return true;
+        } catch {
+          return 'Directory not found.';
+        }
+      }
     });
     const inputDir = inputDirResponse.dir;
     if (!inputDir) {
