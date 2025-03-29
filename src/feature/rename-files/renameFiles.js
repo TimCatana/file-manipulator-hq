@@ -7,9 +7,14 @@ const { log } = require('../../backend/utils/logUtils');
 
 function parseArgs(args) {
   const params = {};
+  const validFlags = ['input', 'base'];
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--')) {
       const flag = args[i].slice(2);
+      if (!validFlags.includes(flag)) {
+        log('ERROR', `Invalid argument: --${flag}`);
+        return { error: true, message: `Invalid argument: --${flag}` };
+      }
       const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
       params[flag] = value;
       i++;
@@ -23,7 +28,7 @@ async function renameFiles(args = process.argv.slice(2)) {
     log('INFO', 'Starting Rename Files Feature');
 
     const params = parseArgs(args);
-    const hasArgs = Object.keys(params).length > 0;
+    if (params.error) return 'error';
 
     let inputDir;
     if (params['input']) {
@@ -35,7 +40,7 @@ async function renameFiles(args = process.argv.slice(2)) {
         log('ERROR', `Input directory not found: ${inputDir}`);
         return 'error';
       }
-    } else if (!hasArgs) {
+    } else {
       log('DEBUG', 'Prompting for input directory');
       const inputDirResponse = await prompts({
         type: 'text',
@@ -57,16 +62,13 @@ async function renameFiles(args = process.argv.slice(2)) {
         log('INFO', 'No input directory provided, cancelling...');
         return 'cancelled';
       }
-    } else {
-      log('ERROR', 'Missing required --input argument');
-      return 'error';
     }
 
     let fileNameBase;
     if (params['base']) {
       fileNameBase = params['base'];
       log('DEBUG', `Base name from args: ${fileNameBase}`);
-    } else if (!hasArgs) {
+    } else {
       log('DEBUG', 'Prompting for base name');
       const fileNameBaseResponse = await prompts({
         type: 'text',
@@ -80,9 +82,6 @@ async function renameFiles(args = process.argv.slice(2)) {
         log('INFO', 'No base name provided, cancelling...');
         return 'cancelled';
       }
-    } else {
-      log('ERROR', 'Missing required --base argument');
-      return 'error';
     }
 
     // Read directory and filter files asynchronously

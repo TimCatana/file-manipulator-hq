@@ -70,9 +70,14 @@ async function processImage(inputPath, outputPath, width, height, method) {
 
 function parseArgs(args) {
   const params = {};
+  const validFlags = ['input', 'output', 'width', 'height', 'method'];
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--')) {
       const flag = args[i].slice(2);
+      if (!validFlags.includes(flag)) {
+        log('ERROR', `Invalid argument: --${flag}`);
+        return { error: true, message: `Invalid argument: --${flag}` };
+      }
       const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
       params[flag] = value;
       i++;
@@ -86,7 +91,7 @@ async function resizeImages(args = process.argv.slice(2)) {
     log('INFO', 'Starting Image Resize Feature');
 
     const params = parseArgs(args);
-    const hasArgs = Object.keys(params).length > 0;
+    if (params.error) return 'error';
 
     let inputPath;
     if (params['input']) {
@@ -96,7 +101,7 @@ async function resizeImages(args = process.argv.slice(2)) {
         return 'error';
       }
       log('DEBUG', `Input path from args: ${inputPath}`);
-    } else if (!hasArgs) {
+    } else {
       log('DEBUG', 'Prompting for input path');
       const inputPathResponse = await prompts({
         type: 'text',
@@ -110,16 +115,13 @@ async function resizeImages(args = process.argv.slice(2)) {
         log('INFO', 'No input path provided, cancelling...');
         return 'cancelled';
       }
-    } else {
-      log('ERROR', 'Missing required --input argument');
-      return 'error';
     }
 
     let outputDir;
     if (params['output']) {
       outputDir = params['output'];
       log('DEBUG', `Output directory from args: ${outputDir}`);
-    } else if (!hasArgs) {
+    } else {
       log('DEBUG', 'Prompting for output directory');
       const outputPathResponse = await prompts({
         type: 'text',
@@ -133,9 +135,6 @@ async function resizeImages(args = process.argv.slice(2)) {
         log('INFO', 'No output directory provided, cancelling...');
         return 'cancelled';
       }
-    } else {
-      log('ERROR', 'Missing required --output argument');
-      return 'error';
     }
 
     log('DEBUG', `Creating output directory: ${outputDir}`);
@@ -146,19 +145,54 @@ async function resizeImages(args = process.argv.slice(2)) {
     log('DEBUG', `Input path stats: ${stats.isFile() ? 'File' : 'Directory'}`);
 
     let width, height, method;
-    if (hasArgs) {
-      if (!params['width'] || !params['height'] || !params['method']) {
-        log('ERROR', 'Missing required arguments: --width, --height, and --method are required when using arguments');
-        return 'error';
+    if (params['width'] || params['height'] || params['method']) {
+      width = params['width'] ? parseInt(params['width'], 10) : null;
+      height = params['height'] ? parseInt(params['height'], 10) : null;
+      method = params['method'] || null;
+
+      if (width === null || height === null || method === null) {
+        log('DEBUG', 'Prompting for missing resize parameters');
+        const resizeResponse = await prompts([
+          {
+            type: width === null ? 'number' : null,
+            name: 'width',
+            message: 'Enter width in pixels:',
+            validate: value => value > 0 ? true : 'Width must be greater than 0'
+          },
+          {
+            type: height === null ? 'number' : null,
+            name: 'height',
+            message: 'Enter height in pixels:',
+            validate: value => value > 0 ? true : 'Height must be greater than 0'
+          },
+          {
+            type: method === null ? 'select' : null,
+            name: 'method',
+            message: 'Choose resize method:',
+            choices: [
+              { title: 'Crop (cuts to fit)', value: 'crop' },
+              { title: 'Stretch (distorts to fit)', value: 'stretch' },
+              { title: 'Contain (letterboxed)', value: 'contain' },
+            ],
+            initial: 0,
+          },
+        ]);
+
+        width = width !== null ? width : resizeResponse.width;
+        height = height !== null ? height : resizeResponse.height;
+        method = method !== null ? method : resizeResponse.method;
+
+        if (!width || !height || !method) {
+          log('INFO', 'Resize options cancelled.');
+          return 'cancelled';
+        }
       }
-      width = parseInt(params['width'], 10);
-      height = parseInt(params['height'], 10);
-      method = params['method'];
+
       if (isNaN(width) || width <= 0 || isNaN(height) || height <= 0 || !['stretch', 'crop', 'contain'].includes(method)) {
         log('ERROR', 'Invalid arguments: --width and --height must be positive numbers, --method must be stretch, crop, or contain');
         return 'error';
       }
-      log('DEBUG', `Resize parameters from args: width=${width}, height=${height}, method=${method}`);
+      log('DEBUG', `Resize parameters from args/prompts: width=${width}, height=${height}, method=${method}`);
     } else {
       const formatChoices = [
         { title: 'Instagram (1080x1080)', value: { width: 1080, height: 1080 } },

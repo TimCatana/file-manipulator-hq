@@ -7,9 +7,14 @@ const { log } = require('../../backend/utils/logUtils');
 
 function parseArgs(args) {
   const params = {};
+  const validFlags = ['input', 'output'];
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--')) {
       const flag = args[i].slice(2);
+      if (!validFlags.includes(flag)) {
+        log('ERROR', `Invalid argument: --${flag}`);
+        return { error: true, message: `Invalid argument: --${flag}` };
+      }
       const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
       params[flag] = value;
       i++;
@@ -23,7 +28,7 @@ async function sortFilesByType(args = process.argv.slice(2)) {
     log('INFO', 'Starting Sort Files By Type Feature');
 
     const params = parseArgs(args);
-    const hasArgs = Object.keys(params).length > 0;
+    if (params.error) return 'error';
 
     let inputDir;
     if (params['input']) {
@@ -33,7 +38,7 @@ async function sortFilesByType(args = process.argv.slice(2)) {
         return 'error';
       }
       log('DEBUG', `Input directory from args: ${inputDir}`);
-    } else if (!hasArgs) {
+    } else {
       log('DEBUG', 'Prompting for input directory');
       const inputDirResponse = await prompts({
         type: 'text',
@@ -47,16 +52,13 @@ async function sortFilesByType(args = process.argv.slice(2)) {
         log('INFO', 'No input directory provided, cancelling...');
         return 'cancelled';
       }
-    } else {
-      log('ERROR', 'Missing required --input argument');
-      return 'error';
     }
 
     let outputDir;
     if (params['output']) {
       outputDir = params['output'];
       log('DEBUG', `Output directory from args: ${outputDir}`);
-    } else if (!hasArgs) {
+    } else {
       log('DEBUG', 'Prompting for output directory');
       const outputDirResponse = await prompts({
         type: 'text',
@@ -70,9 +72,6 @@ async function sortFilesByType(args = process.argv.slice(2)) {
         log('INFO', 'No output directory provided, cancelling...');
         return 'cancelled';
       }
-    } else {
-      log('ERROR', 'Missing required --output argument');
-      return 'error';
     }
 
     log('DEBUG', `Creating output directory: ${outputDir}`);

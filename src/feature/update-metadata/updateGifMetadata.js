@@ -66,9 +66,14 @@ async function processGifFile(inputFile, outputFile, metadata) {
 
 function parseArgs(args) {
   const params = {};
+  const validFlags = ['input', 'output', 'title', 'description', 'keywords', 'copyright', 'genre', 'comment'];
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--')) {
       const flag = args[i].slice(2);
+      if (!validFlags.includes(flag)) {
+        log('ERROR', `Invalid argument: --${flag}`);
+        return { error: true, message: `Invalid argument: --${flag}` };
+      }
       const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
       params[flag] = value;
       i++;
@@ -87,7 +92,7 @@ async function updateGifMetadata(args = process.argv.slice(2)) {
     }
 
     const params = parseArgs(args);
-    const hasArgs = Object.keys(params).length > 0;
+    if (params.error) return 'error';
 
     let inputPath;
     if (params['input']) {
@@ -97,7 +102,7 @@ async function updateGifMetadata(args = process.argv.slice(2)) {
         return 'error';
       }
       log('DEBUG', `Input path from args: ${inputPath}`);
-    } else if (!hasArgs) {
+    } else {
       log('DEBUG', 'Prompting for input path');
       const inputPathResponse = await prompts({
         type: 'text',
@@ -111,16 +116,13 @@ async function updateGifMetadata(args = process.argv.slice(2)) {
         log('INFO', 'No input path provided, cancelling...');
         return 'cancelled';
       }
-    } else {
-      log('ERROR', 'Missing required --input argument');
-      return 'error';
     }
 
     let outputDir;
     if (params['output']) {
       outputDir = params['output'];
       log('DEBUG', `Output directory from args: ${outputDir}`);
-    } else if (!hasArgs) {
+    } else {
       log('DEBUG', 'Prompting for output directory');
       const outputPathResponse = await prompts({
         type: 'text',
@@ -134,9 +136,6 @@ async function updateGifMetadata(args = process.argv.slice(2)) {
         log('INFO', 'No output directory provided, cancelling...');
         return 'cancelled';
       }
-    } else {
-      log('ERROR', 'Missing required --output argument');
-      return 'error';
     }
 
     const defaultMetadata = {
@@ -148,18 +147,34 @@ async function updateGifMetadata(args = process.argv.slice(2)) {
       comment: ''
     };
     let metadata;
-    if (hasArgs) {
+    if (params['title'] || params['description'] || params['keywords'] || params['copyright'] || params['genre'] || params['comment']) {
       metadata = {
-        title: params['title'] || defaultMetadata.title,
-        description: params['description'] || defaultMetadata.description,
-        keywords: params['keywords'] || defaultMetadata.keywords,
-        copyright: params['copyright'] || defaultMetadata.copyright,
-        genre: params['genre'] || defaultMetadata.genre,
-        comment: params['comment'] || defaultMetadata.comment
+        title: params['title'] || null,
+        description: params['description'] || null,
+        keywords: params['keywords'] || null,
+        copyright: params['copyright'] || null,
+        genre: params['genre'] || null,
+        comment: params['comment'] || null
       };
-      log('DEBUG', `Metadata from args: ${JSON.stringify(metadata)}`);
+
+      const metadataPrompts = [];
+      if (!metadata.title) metadataPrompts.push({ type: 'text', name: 'title', message: 'Enter title:', initial: defaultMetadata.title });
+      if (!metadata.description) metadataPrompts.push({ type: 'text', name: 'description', message: 'Enter description:', initial: defaultMetadata.description });
+      if (!metadata.keywords) metadataPrompts.push({ type: 'text', name: 'keywords', message: 'Enter keywords (comma-separated):', initial: defaultMetadata.keywords });
+      if (!metadata.copyright) metadataPrompts.push({ type: 'text', name: 'copyright', message: 'Enter copyright:', initial: defaultMetadata.copyright });
+      if (!metadata.genre) metadataPrompts.push({ type: 'text', name: 'genre', message: 'Enter genre:', initial: defaultMetadata.genre });
+      if (!metadata.comment) metadataPrompts.push({ type: 'text', name: 'comment', message: 'Enter comment:', initial: defaultMetadata.comment });
+
+      if (metadataPrompts.length > 0) {
+        log('DEBUG', 'Prompting for missing metadata fields');
+        const additionalMetadata = await prompts(metadataPrompts);
+        metadata = { ...defaultMetadata, ...metadata, ...additionalMetadata };
+      } else {
+        metadata = { ...defaultMetadata, ...metadata };
+      }
+      log('DEBUG', `Metadata from args/prompts: ${JSON.stringify(metadata)}`);
     } else {
-      log('DEBUG', 'Prompting for metadata input');
+      log('DEBUG', 'Prompting for full metadata input');
       metadata = await prompts([
         { type: 'text', name: 'title', message: 'Enter title:', initial: defaultMetadata.title },
         { type: 'text', name: 'description', message: 'Enter description:', initial: defaultMetadata.description },
@@ -169,6 +184,11 @@ async function updateGifMetadata(args = process.argv.slice(2)) {
         { type: 'text', name: 'comment', message: 'Enter comment:', initial: defaultMetadata.comment }
       ]);
       log('DEBUG', `Metadata collected: ${JSON.stringify(metadata)}`);
+      if (!metadata.title) {
+        log('INFO', 'Metadata input cancelled.');
+        return 'cancelled';
+      }
+      metadata = { ...defaultMetadata, ...metadata };
     }
 
     log('DEBUG', `Creating output directory: ${outputDir}`);
