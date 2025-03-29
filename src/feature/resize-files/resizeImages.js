@@ -20,8 +20,10 @@ function generateUniqueFilename(originalPath) {
 // Process a single image
 async function processImage(inputPath, outputPath, width, height, method) {
   try {
+    log('DEBUG', `Processing image: ${inputPath} -> ${outputPath} (${width}x${height}, method: ${method})`);
     const image = sharp(inputPath);
     const metadata = await image.metadata();
+    log('DEBUG', `Image metadata: width=${metadata.width}, height=${metadata.height}`);
 
     switch (method) {
       case 'stretch':
@@ -38,6 +40,7 @@ async function processImage(inputPath, outputPath, width, height, method) {
           newWidth = width;
           newHeight = Math.round(width * (metadata.height / metadata.width));
         }
+        log('DEBUG', `Crop resizing to intermediate: ${newWidth}x${newHeight}`);
         await image
           .resize(newWidth, newHeight)
           .extract({
@@ -56,9 +59,11 @@ async function processImage(inputPath, outputPath, width, height, method) {
       default:
         throw new Error(`Invalid resize method: ${method}`);
     }
+    log('DEBUG', `Successfully processed ${inputPath} to ${outputPath}`);
     return true;
   } catch (error) {
     log('ERROR', `Error processing ${inputPath}: ${error.message}`);
+    log('DEBUG', `Process image error stack: ${error.stack}`);
     return false;
   }
 }
@@ -67,6 +72,7 @@ async function resizeImages() {
   try {
     log('INFO', 'Starting Image Resize Feature');
 
+    log('DEBUG', 'Prompting for input path');
     const inputPathResponse = await prompts({
       type: 'text',
       name: 'path',
@@ -74,11 +80,13 @@ async function resizeImages() {
       validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Path not found.'
     });
     const inputPath = inputPathResponse.path;
+    log('DEBUG', `Input path provided: ${inputPath}`);
     if (!inputPath) {
       log('INFO', 'No input path provided, cancelling...');
       return 'cancelled';
     }
 
+    log('DEBUG', 'Prompting for output directory');
     const outputPathResponse = await prompts({
       type: 'text',
       name: 'path',
@@ -86,13 +94,18 @@ async function resizeImages() {
       validate: value => value.trim() !== '' ? true : 'Output directory required.'
     });
     const outputDir = outputPathResponse.path;
+    log('DEBUG', `Output directory provided: ${outputDir}`);
     if (!outputDir) {
       log('INFO', 'No output directory provided, cancelling...');
       return 'cancelled';
     }
 
+    log('DEBUG', `Creating output directory: ${outputDir}`);
     await fs.mkdir(outputDir, { recursive: true });
+    log('DEBUG', `Output directory created or verified: ${outputDir}`);
+
     const stats = await fs.stat(inputPath);
+    log('DEBUG', `Input path stats: ${stats.isFile() ? 'File' : 'Directory'}`);
 
     const formatChoices = [
       { title: 'Instagram (1080x1080)', value: { width: 1080, height: 1080 } },
@@ -101,6 +114,7 @@ async function resizeImages() {
       { title: 'Custom size', value: 'custom' },
     ];
 
+    log('DEBUG', 'Prompting for resize options');
     const resizeResponse = await prompts([
       {
         type: 'select',
@@ -134,6 +148,7 @@ async function resizeImages() {
       },
     ]);
 
+    log('DEBUG', `Resize options selected: ${JSON.stringify(resizeResponse)}`);
     if (!resizeResponse.format) {
       log('INFO', 'Resize options cancelled.');
       return 'cancelled';
@@ -142,6 +157,7 @@ async function resizeImages() {
     const width = resizeResponse.format === 'custom' ? resizeResponse.width : resizeResponse.format.width;
     const height = resizeResponse.format === 'custom' ? resizeResponse.height : resizeResponse.format.height;
     const method = resizeResponse.method;
+    log('DEBUG', `Resize parameters: width=${width}, height=${height}, method=${method}`);
 
     let processed = 0, failed = 0;
 
@@ -152,12 +168,15 @@ async function resizeImages() {
         return 'error';
       }
       const outputFile = path.join(outputDir, generateUniqueFilename(inputPath));
+      log('DEBUG', `Generated output filename: ${outputFile}`);
       const success = await processImage(inputPath, outputFile, width, height, method);
       if (success) processed++;
       else failed++;
     } else if (stats.isDirectory()) {
+      log('DEBUG', `Reading directory: ${inputPath}`);
       const files = await fs.readdir(inputPath);
       const imageFiles = files.filter(f => SUPPORTED_EXTENSIONS.includes(path.extname(f).toLowerCase()));
+      log('DEBUG', `Found ${imageFiles.length} supported image files: ${imageFiles.join(', ')}`);
       if (imageFiles.length === 0) {
         log('INFO', 'No supported image files found in the directory.');
         return 'success';
@@ -165,6 +184,7 @@ async function resizeImages() {
       for (const file of imageFiles) {
         const inputFile = path.join(inputPath, file);
         const outputFile = path.join(outputDir, generateUniqueFilename(file));
+        log('DEBUG', `Generated output filename: ${outputFile}`);
         const success = await processImage(inputFile, outputFile, width, height, method);
         if (success) processed++;
         else failed++;
@@ -172,9 +192,11 @@ async function resizeImages() {
       log('INFO', `Processed ${processed} images, ${failed} failed.`);
     }
 
+    log('DEBUG', `Image Resize completed: ${processed} processed, ${failed} failed`);
     return failed === 0 ? 'success' : 'error';
   } catch (error) {
     log('ERROR', `Unexpected error in Image Resize: ${error.message}`);
+    log('DEBUG', `Error stack: ${error.stack}`);
     return 'error';
   }
 }

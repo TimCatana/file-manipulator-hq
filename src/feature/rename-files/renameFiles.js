@@ -9,6 +9,7 @@ async function renameFiles() {
   try {
     log('INFO', 'Starting Rename Files Feature');
 
+    log('DEBUG', 'Prompting for input directory');
     const inputDirResponse = await prompts({
       type: 'text',
       name: 'dir',
@@ -24,11 +25,13 @@ async function renameFiles() {
       }
     });
     const inputDir = inputDirResponse.dir;
+    log('DEBUG', `Input directory provided: ${inputDir}`);
     if (!inputDir) {
       log('INFO', 'No input directory provided, cancelling...');
       return 'cancelled';
     }
 
+    log('DEBUG', 'Prompting for base name');
     const fileNameBaseResponse = await prompts({
       type: 'text',
       name: 'base',
@@ -36,12 +39,14 @@ async function renameFiles() {
       validate: value => value.trim() !== '' ? true : 'Base name required.'
     });
     const fileNameBase = fileNameBaseResponse.base;
+    log('DEBUG', `Base name provided: ${fileNameBase}`);
     if (!fileNameBase) {
       log('INFO', 'No base name provided, cancelling...');
       return 'cancelled';
     }
 
     // Read directory and filter files asynchronously
+    log('DEBUG', `Reading directory: ${inputDir}`);
     const dirEntries = await fs.readdir(inputDir);
     const files = [];
     for (const entry of dirEntries) {
@@ -51,6 +56,7 @@ async function renameFiles() {
         files.push(fullPath);
       }
     }
+    log('DEBUG', `Found ${files.length} files in ${inputDir}: ${files.join(', ')}`);
 
     if (files.length === 0) {
       log('INFO', `No files found in ${inputDir}`);
@@ -65,6 +71,7 @@ async function renameFiles() {
       const originalExt = path.extname(file);
       const newFileName = `${fileNameBase}-${index + 1}${originalExt}`;
       const newFilePath = path.join(inputDir, newFileName);
+      log('DEBUG', `Renaming ${file} to ${newFilePath}`);
 
       try {
         if (file !== newFilePath) {
@@ -75,14 +82,17 @@ async function renameFiles() {
         }
       } catch (error) {
         log('ERROR', `Error renaming ${file} to ${newFileName}: ${error.message}`);
+        log('DEBUG', `Rename error stack: ${error.stack}`);
         failed++;
       }
     }
 
     log('INFO', `Renamed ${files.length - failed} files, ${failed} failed.`);
+    log('DEBUG', `Rename Files completed: ${files.length - failed} renamed, ${failed} failed`);
     return failed === 0 ? 'success' : 'error';
   } catch (error) {
     log('ERROR', `Unexpected error in Rename Files: ${error.message}`);
+    log('DEBUG', `Error stack: ${error.stack}`);
     return 'error';
   }
 }

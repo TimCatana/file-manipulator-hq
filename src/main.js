@@ -11,7 +11,7 @@ const { updateMp4Metadata } = require('./feature/update-metadata/updateMp4Metada
 const { updatePngMetadata } = require('./feature/update-metadata/updatePngMetadata');
 const { updateWavMetadata } = require('./feature/update-metadata/updateWavMetadata');
 const { updateWebpMetadata } = require('./feature/update-metadata/updateWebpMetadata');
-// Convert File Type Imports
+// Convert File Type Imports (unchanged imports omitted for brevity)
 const { convertGifToMp4 } = require('./feature/convert-file-type/convert-videos/convertGifToMp4');
 const { convertGifToWebm } = require('./feature/convert-file-type/convert-videos/convertGifToWebm');
 const { convertMp4ToGif } = require('./feature/convert-file-type/convert-videos/convertMp4ToGif');
@@ -45,11 +45,12 @@ function displayHelp() {
 main.js - Metadata Update, File Conversion, Resize, Rename & Sort Console Application
 
 Usage:
-  node src/main.js [--help]
+  node src/main.js [--help] [--verbose]
 
 Options:
   --help        Display this help and exit
   -v, --version Display version and exit
+  --verbose     Enable verbose logging
 
 Features:
   - Update Metadata: GIF, JPG, MP4, PNG, WAV, WebP
@@ -73,22 +74,25 @@ Directories:
 // Ensure base directories exist
 async function ensureDirectories() {
   const dirs = [BIN_DIR, JSON_DIR, LOG_DIR];
+  log('DEBUG', `Ensuring directories exist: ${dirs.join(', ')}`);
   try {
     await Promise.all(
       dirs.map((dir) => fs.promises.mkdir(dir, { recursive: true }))
     );
     log('INFO', 'All required base directories are present.');
+    log('DEBUG', `Successfully created/verified directories: ${dirs.join(', ')}`);
   } catch (err) {
     log('ERROR', `Failed to create base directories: ${err.message}`);
+    log('DEBUG', `Directory creation error stack: ${err.stack}`);
   }
 }
 
 // Main execution
-(async () => {
-  setupConsoleLogging();
-  log('DEBUG', 'Starting main execution');
-
+async function main() {
   const args = process.argv.slice(2);
+  setupConsoleLogging(args, LOG_DIR); // Pass LOG_DIR to setupConsoleLogging
+  log('DEBUG', `Starting main execution with args: ${args.join(', ')}`);
+
   if (args.includes('--help')) {
     displayHelp();
     return;
@@ -118,6 +122,7 @@ async function ensureDirectories() {
       initial: 0,
     });
 
+    log('DEBUG', `User selected choice: ${initialResponse.choice}`);
     if (!initialResponse.choice || initialResponse.choice === 'exit') {
       log('INFO', 'Exiting application.');
       process.exit(0);
@@ -125,25 +130,34 @@ async function ensureDirectories() {
 
     switch (initialResponse.choice) {
       case 'updateMetadata':
+        log('DEBUG', 'Entering metadata menu');
         await metadataMenu();
         break;
       case 'convertFileType':
+        log('DEBUG', 'Entering convert menu');
         await convertMenu();
         break;
       case 'resizeFiles':
+        log('DEBUG', 'Entering resize menu');
         await resizeMenu();
         break;
       case 'renameFiles':
+        log('DEBUG', 'Starting rename files feature');
         const renameResult = await renameFiles();
+        log('DEBUG', `Rename result: ${renameResult}`);
         if (renameResult === 'cancelled') log('INFO', 'Rename cancelled by user.');
         else if (renameResult === 'success') log('INFO', 'Rename completed successfully.');
         else log('INFO', 'Rename failed.');
         break;
       case 'sortFiles':
+        log('DEBUG', 'Entering sort menu');
         await sortMenu();
         break;
+      default:
+        log('WARN', `Unknown choice selected: ${initialResponse.choice}`);
     }
 
+    log('DEBUG', 'Returning to main menu');
     await mainMenu();
   }
 
@@ -165,6 +179,7 @@ async function ensureDirectories() {
       initial: 0,
     });
 
+    log('DEBUG', `User selected metadata type: ${metadataResponse.metadataType}`);
     if (!metadataResponse.metadataType || metadataResponse.metadataType === 'back') {
       log('INFO', 'Returning to main menu.');
       return;
@@ -172,19 +187,41 @@ async function ensureDirectories() {
 
     let result;
     switch (metadataResponse.metadataType) {
-      case 'gif': result = await updateGifMetadata(); break;
-      case 'jpg': result = await updateJpgMetadata(); break;
-      case 'mp4': result = await updateMp4Metadata(); break;
-      case 'png': result = await updatePngMetadata(); break;
-      case 'wav': result = await updateWavMetadata(); break;
-      case 'webp': result = await updateWebpMetadata(); break;
-      default: log('WARN', 'Invalid metadata type selected.'); result = 'error';
+      case 'gif':
+        log('DEBUG', 'Starting GIF metadata update');
+        result = await updateGifMetadata();
+        break;
+      case 'jpg':
+        log('DEBUG', 'Starting JPG metadata update');
+        result = await updateJpgMetadata();
+        break;
+      case 'mp4':
+        log('DEBUG', 'Starting MP4 metadata update');
+        result = await updateMp4Metadata();
+        break;
+      case 'png':
+        log('DEBUG', 'Starting PNG metadata update');
+        result = await updatePngMetadata();
+        break;
+      case 'wav':
+        log('DEBUG', 'Starting WAV metadata update');
+        result = await updateWavMetadata();
+        break;
+      case 'webp':
+        log('DEBUG', 'Starting WebP metadata update');
+        result = await updateWebpMetadata();
+        break;
+      default:
+        log('WARN', `Invalid metadata type selected: ${metadataResponse.metadataType}`);
+        result = 'error';
     }
 
+    log('DEBUG', `Metadata update result: ${result}`);
     if (result === 'cancelled') log('INFO', 'Metadata update cancelled by user.');
     else if (result === 'success') log('INFO', 'Metadata update completed successfully.');
     else log('INFO', 'Metadata update failed.');
 
+    log('DEBUG', 'Returning to metadata menu');
     await metadataMenu();
   }
 
@@ -202,21 +239,26 @@ async function ensureDirectories() {
       initial: 0,
     });
 
+    log('DEBUG', `User selected convert type: ${convertResponse.convertType}`);
     if (!convertResponse.convertType || convertResponse.convertType === 'back') {
       log('INFO', 'Returning to main menu.');
       return;
     }
 
     if (convertResponse.convertType === 'videos') {
+      log('DEBUG', 'Entering video convert menu');
       await videoConvertMenu();
     } else if (convertResponse.convertType === 'images') {
+      log('DEBUG', 'Entering image convert menu');
       await imageConvertMenu();
     }
 
+    log('DEBUG', 'Returning to convert menu');
     await convertMenu();
   }
 
   async function videoConvertMenu() {
+    log('DEBUG', 'Prompting for video conversion selection');
     const videoResponse = await prompts({
       type: 'select',
       name: 'conversion',
@@ -233,6 +275,7 @@ async function ensureDirectories() {
       initial: 0,
     });
 
+    log('DEBUG', `User selected video conversion: ${videoResponse.conversion}`);
     if (!videoResponse.conversion || videoResponse.conversion === 'back') {
       log('INFO', 'Returning to conversion type menu.');
       return;
@@ -240,23 +283,46 @@ async function ensureDirectories() {
 
     let result;
     switch (videoResponse.conversion) {
-      case 'gifToMp4': result = await convertGifToMp4(); break;
-      case 'gifToWebm': result = await convertGifToWebm(); break;
-      case 'mp4ToGif': result = await convertMp4ToGif(); break;
-      case 'mp4ToWebm': result = await convertMp4ToWebm(); break;
-      case 'webmToGif': result = await convertWebmToGif(); break;
-      case 'webmToMp4': result = await convertWebmToMp4(); break;
-      default: log('WARN', 'Invalid video conversion selected.'); result = 'error';
+      case 'gifToMp4':
+        log('DEBUG', 'Starting GIF to MP4 conversion');
+        result = await convertGifToMp4();
+        break;
+      case 'gifToWebm':
+        log('DEBUG', 'Starting GIF to WebM conversion');
+        result = await convertGifToWebm();
+        break;
+      case 'mp4ToGif':
+        log('DEBUG', 'Starting MP4 to GIF conversion');
+        result = await convertMp4ToGif();
+        break;
+      case 'mp4ToWebm':
+        log('DEBUG', 'Starting MP4 to WebM conversion');
+        result = await convertMp4ToWebm();
+        break;
+      case 'webmToGif':
+        log('DEBUG', 'Starting WebM to GIF conversion');
+        result = await convertWebmToGif();
+        break;
+      case 'webmToMp4':
+        log('DEBUG', 'Starting WebM to MP4 conversion');
+        result = await convertWebmToMp4();
+        break;
+      default:
+        log('WARN', `Invalid video conversion selected: ${videoResponse.conversion}`);
+        result = 'error';
     }
 
+    log('DEBUG', `Video conversion result: ${result}`);
     if (result === 'cancelled') log('INFO', 'Video conversion cancelled by user.');
     else if (result === 'success') log('INFO', 'Video conversion completed successfully.');
     else log('INFO', 'Video conversion failed.');
 
+    log('DEBUG', 'Returning to video convert menu');
     await videoConvertMenu();
   }
 
   async function imageConvertMenu() {
+    log('DEBUG', 'Prompting for image conversion selection');
     const imageResponse = await prompts({
       type: 'select',
       name: 'conversion',
@@ -273,6 +339,7 @@ async function ensureDirectories() {
       initial: 0,
     });
 
+    log('DEBUG', `User selected image conversion: ${imageResponse.conversion}`);
     if (!imageResponse.conversion || imageResponse.conversion === 'back') {
       log('INFO', 'Returning to conversion type menu.');
       return;
@@ -280,19 +347,41 @@ async function ensureDirectories() {
 
     let result;
     switch (imageResponse.conversion) {
-      case 'jpgToPng': result = await convertJpgToPng(); break;
-      case 'jpgToWebp': result = await convertJpgToWebp(); break;
-      case 'pngToJpg': result = await convertPngToJpg(); break;
-      case 'pngToWebp': result = await convertPngToWebp(); break;
-      case 'webpToJpg': result = await convertWebpToJpg(); break;
-      case 'webpToPng': result = await convertWebpToPng(); break;
-      default: log('WARN', 'Invalid image conversion selected.'); result = 'error';
+      case 'jpgToPng':
+        log('DEBUG', 'Starting JPG to PNG conversion');
+        result = await convertJpgToPng();
+        break;
+      case 'jpgToWebp':
+        log('DEBUG', 'Starting JPG to WebP conversion');
+        result = await convertJpgToWebp();
+        break;
+      case 'pngToJpg':
+        log('DEBUG', 'Starting PNG to JPG conversion');
+        result = await convertPngToJpg();
+        break;
+      case 'pngToWebp':
+        log('DEBUG', 'Starting PNG to WebP conversion');
+        result = await convertPngToWebp();
+        break;
+      case 'webpToJpg':
+        log('DEBUG', 'Starting WebP to JPG conversion');
+        result = await convertWebpToJpg();
+        break;
+      case 'webpToPng':
+        log('DEBUG', 'Starting WebP to PNG conversion');
+        result = await convertWebpToPng();
+        break;
+      default:
+        log('WARN', `Invalid image conversion selected: ${imageResponse.conversion}`);
+        result = 'error';
     }
 
+    log('DEBUG', `Image conversion result: ${result}`);
     if (result === 'cancelled') log('INFO', 'Image conversion cancelled by user.');
     else if (result === 'success') log('INFO', 'Image conversion completed successfully.');
     else log('INFO', 'Image conversion failed.');
 
+    log('DEBUG', 'Returning to image convert menu');
     await imageConvertMenu();
   }
 
@@ -310,6 +399,7 @@ async function ensureDirectories() {
       initial: 0,
     });
 
+    log('DEBUG', `User selected resize type: ${resizeResponse.resizeType}`);
     if (!resizeResponse.resizeType || resizeResponse.resizeType === 'back') {
       log('INFO', 'Returning to main menu.');
       return;
@@ -326,14 +416,16 @@ async function ensureDirectories() {
         result = await resizeVideos();
         break;
       default:
-        log('WARN', 'Invalid resize type selected.');
+        log('WARN', `Invalid resize type selected: ${resizeResponse.resizeType}`);
         result = 'error';
     }
 
+    log('DEBUG', `Resize result: ${result}`);
     if (result === 'cancelled') log('INFO', 'Resize cancelled by user.');
     else if (result === 'success') log('INFO', 'Resize completed successfully.');
     else log('INFO', 'Resize failed.');
 
+    log('DEBUG', 'Returning to resize menu');
     await resizeMenu();
   }
 
@@ -351,6 +443,7 @@ async function ensureDirectories() {
       initial: 0,
     });
 
+    log('DEBUG', `User selected sort type: ${sortResponse.sortType}`);
     if (!sortResponse.sortType || sortResponse.sortType === 'back') {
       log('INFO', 'Returning to main menu.');
       return;
@@ -367,16 +460,27 @@ async function ensureDirectories() {
         result = await sortFilesByType();
         break;
       default:
-        log('WARN', 'Invalid sort type selected.');
+        log('WARN', `Invalid sort type selected: ${sortResponse.sortType}`);
         result = 'error';
     }
 
+    log('DEBUG', `Sort result: ${result}`);
     if (result === 'cancelled') log('INFO', 'Sort cancelled by user.');
     else if (result === 'success') log('INFO', 'Sort completed successfully.');
     else log('INFO', 'Sort failed.');
 
+    log('DEBUG', 'Returning to sort menu');
     await sortMenu();
   }
 
+  log('DEBUG', 'Launching main menu');
   await mainMenu();
-})();
+}
+
+if (require.main === module) {
+  main().catch(err => {
+    log('ERROR', `Unexpected error in main: ${err.message}`);
+    log('DEBUG', `Main error stack: ${err.stack}`);
+    process.exit(1);
+  });
+}

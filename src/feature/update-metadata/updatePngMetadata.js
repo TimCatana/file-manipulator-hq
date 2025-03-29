@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 const prompts = require('prompts');
-const fs = require('fs'); // For existsSync
-const fsPromises = require('fs').promises; // For promise-based operations
+const fs = require('fs');
+const fsPromises = require('fs').promises;
 const path = require('path');
 const { execSync } = require('child_process');
 const extractChunks = require('png-chunks-extract');
@@ -21,12 +21,15 @@ function getCurrentDateTime() {
 }
 
 function checkExifTool() {
+  log('DEBUG', 'Checking for ExifTool installation');
   try {
     const version = execSync('exiftool -ver', { encoding: 'utf8' }).trim();
     log('INFO', `ExifTool version: ${version}`);
+    log('DEBUG', 'ExifTool check successful');
     return true;
   } catch (error) {
     log('ERROR', 'ExifTool is not installed or not in PATH.');
+    log('DEBUG', `ExifTool check failed: ${error.message}`);
     return false;
   }
 }
@@ -67,6 +70,7 @@ function generateXMP(title, description, keywords, copyright, genre, comment) {
     .map(k => k.trim())
     .map(k => `<rdf:li>${k}</rdf:li>`)
     .join('');
+  log('DEBUG', `Generating XMP metadata with date: ${currentDateTime}`);
   return `<x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="XMP Core 5.1.2">
  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
   <rdf:Description rdf:about=""
@@ -108,13 +112,18 @@ function generateXMP(title, description, keywords, copyright, genre, comment) {
 
 async function processPngFile(inputFile, outputFile, metadata) {
   const currentDateTime = getCurrentDateTime();
+  log('DEBUG', `Processing PNG file: ${inputFile} -> ${outputFile}`);
   const buffer = await fsPromises.readFile(inputFile);
+  log('DEBUG', `Read ${inputFile} with buffer length: ${buffer.length}`);
   let chunks = extractChunks(buffer);
+  log('DEBUG', `Extracted ${chunks.length} chunks from ${inputFile}`);
   chunks = chunks.filter(chunk => !['tEXt', 'zTXt', 'iTXt'].includes(chunk.name));
+  log('DEBUG', `Filtered out text chunks, remaining: ${chunks.length}`);
   const idatIndex = chunks.findIndex(c => c.name === 'IDAT');
   if (idatIndex === -1) {
     throw new Error('Invalid PNG file: No IDAT chunk found.');
   }
+  log('DEBUG', `IDAT chunk found at index: ${idatIndex}`);
 
   const newTextChunks = [
     createTextChunk('Title', metadata.title),
@@ -125,20 +134,24 @@ async function processPngFile(inputFile, outputFile, metadata) {
     createTextChunk('Comment', metadata.comment),
     createTextChunk('Creation Time', currentDateTime),
   ];
+  log('DEBUG', `Created ${newTextChunks.length} new text chunks`);
 
   const xmpXml = generateXMP(metadata.title, metadata.description, metadata.keywords, metadata.copyright, metadata.genre, metadata.comment);
   const xmpChunk = createXMPChunk(xmpXml);
+  log('DEBUG', `Generated XMP chunk with length: ${xmpChunk.data.length}`);
 
   chunks.splice(idatIndex, 0, ...newTextChunks, xmpChunk);
+  log('DEBUG', `Inserted new chunks, total now: ${chunks.length}`);
   const newBuffer = encodeChunks(chunks);
+  log('DEBUG', `Encoded new buffer with length: ${newBuffer.length}`);
 
+  log('DEBUG', `Writing new buffer to ${outputFile}`);
   await fsPromises.writeFile(outputFile, newBuffer);
   log('INFO', `Success: Metadata updated for ${outputFile}`);
 
-  execSync(
-    `exiftool -ModifyDate="${currentDateTime}" -DateTimeOriginal="${currentDateTime}" -CreateDate="${currentDateTime}" -overwrite_original "${outputFile}"`,
-    { stdio: 'inherit' }
-  );
+  const exifCommand = `exiftool -ModifyDate="${currentDateTime}" -DateTimeOriginal="${currentDateTime}" -CreateDate="${currentDateTime}" -overwrite_original "${outputFile}"`;
+  log('DEBUG', `Executing ExifTool command: ${exifCommand}`);
+  execSync(exifCommand, { stdio: 'inherit' });
 }
 
 async function updatePngMetadata() {
@@ -150,6 +163,7 @@ async function updatePngMetadata() {
       return 'error';
     }
 
+    log('DEBUG', 'Prompting for input path');
     const inputPathResponse = await prompts({
       type: 'text',
       name: 'path',
@@ -157,11 +171,13 @@ async function updatePngMetadata() {
       validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Path not found.'
     });
     const inputPath = inputPathResponse.path;
+    log('DEBUG', `Input path provided: ${inputPath}`);
     if (!inputPath) {
       log('INFO', 'No input path provided, cancelling...');
       return 'cancelled';
     }
 
+    log('DEBUG', 'Prompting for output directory');
     const outputPathResponse = await prompts({
       type: 'text',
       name: 'path',
@@ -169,11 +185,13 @@ async function updatePngMetadata() {
       validate: value => value.trim() !== '' ? true : 'Output directory required.'
     });
     const outputDir = outputPathResponse.path;
+    log('DEBUG', `Output directory provided: ${outputDir}`);
     if (!outputDir) {
       log('INFO', 'No output directory provided, cancelling...');
       return 'cancelled';
     }
 
+    log('DEBUG', 'Prompting for metadata input');
     const metadata = await prompts([
       { type: 'text', name: 'title', message: 'Enter title:', initial: 'Untitled' },
       { type: 'text', name: 'description', message: 'Enter description:', initial: '' },
@@ -182,9 +200,14 @@ async function updatePngMetadata() {
       { type: 'text', name: 'genre', message: 'Enter genre:', initial: '' },
       { type: 'text', name: 'comment', message: 'Enter comment:', initial: '' }
     ]);
+    log('DEBUG', `Metadata collected: ${JSON.stringify(metadata)}`);
 
+    log('DEBUG', `Creating output directory: ${outputDir}`);
     await fsPromises.mkdir(outputDir, { recursive: true });
+    log('DEBUG', `Output directory created or verified: ${outputDir}`);
+
     const stats = await fsPromises.stat(inputPath);
+    log('DEBUG', `Input path stats: ${stats.isFile() ? 'File' : 'Directory'}`);
 
     if (stats.isFile()) {
       if (!inputPath.toLowerCase().endsWith('.png')) {
@@ -192,10 +215,12 @@ async function updatePngMetadata() {
         return 'error';
       }
       const outputFile = path.join(outputDir, path.basename(inputPath));
-      await processPngFile(inputPath, outputFile, metadata);
+      await processPngFile(inputFile, outputFile, metadata);
     } else if (stats.isDirectory()) {
+      log('DEBUG', `Reading directory: ${inputPath}`);
       const files = await fsPromises.readdir(inputPath);
       const pngFiles = files.filter(f => f.toLowerCase().endsWith('.png'));
+      log('DEBUG', `Found ${pngFiles.length} PNG files: ${pngFiles.join(', ')}`);
       if (pngFiles.length === 0) {
         log('INFO', 'No PNG files found in the directory.');
         return 'success';
@@ -208,9 +233,11 @@ async function updatePngMetadata() {
       log('INFO', `Processed ${pngFiles.length} PNG files.`);
     }
 
+    log('DEBUG', 'Update PNG Metadata completed successfully');
     return 'success';
   } catch (error) {
     log('ERROR', `Unexpected error in Update PNG Metadata: ${error.message}`);
+    log('DEBUG', `Error stack: ${error.stack}`);
     return 'error';
   }
 }

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 const prompts = require('prompts');
-const fs = require('fs'); // Added for existsSync
-const fsPromises = require('fs').promises; // Renamed to avoid conflict
+const fs = require('fs');
+const fsPromises = require('fs').promises;
 const path = require('path');
 const { execSync } = require('child_process');
 const { log } = require('../../backend/utils/logUtils');
@@ -19,18 +19,22 @@ function getCurrentDateTime() {
 }
 
 function checkExifTool() {
+  log('DEBUG', 'Checking for ExifTool installation');
   try {
     const version = execSync('exiftool -ver', { encoding: 'utf8' }).trim();
     log('INFO', `ExifTool version: ${version}`);
+    log('DEBUG', 'ExifTool check successful');
     return true;
   } catch (error) {
     log('ERROR', 'ExifTool is not installed or not in PATH.');
+    log('DEBUG', `ExifTool check failed: ${error.message}`);
     return false;
   }
 }
 
 async function processWebpFile(inputFile, outputFile, metadata) {
   const currentDateTime = getCurrentDateTime();
+  log('DEBUG', `Processing WebP file: ${inputFile} -> ${outputFile}`);
   const command = [
     'exiftool',
     `-EXIF:ImageDescription="${metadata.description}"`,
@@ -51,9 +55,13 @@ async function processWebpFile(inputFile, outputFile, metadata) {
     '-overwrite_original',
     `"${outputFile}"`
   ].join(' ');
+  log('DEBUG', `ExifTool command: ${command}`);
 
+  log('DEBUG', `Copying file from ${inputFile} to ${outputFile}`);
   await fsPromises.copyFile(inputFile, outputFile);
   log('INFO', `Copied ${path.basename(inputFile)} to ${outputFile}`);
+
+  log('DEBUG', `Executing ExifTool command for ${outputFile}`);
   execSync(command, { stdio: 'inherit' });
   log('INFO', `Success: Metadata updated for ${outputFile}`);
 }
@@ -67,6 +75,7 @@ async function updateWebpMetadata() {
       return 'error';
     }
 
+    log('DEBUG', 'Prompting for input path');
     const inputPathResponse = await prompts({
       type: 'text',
       name: 'path',
@@ -74,11 +83,13 @@ async function updateWebpMetadata() {
       validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Path not found.'
     });
     const inputPath = inputPathResponse.path;
+    log('DEBUG', `Input path provided: ${inputPath}`);
     if (!inputPath) {
       log('INFO', 'No input path provided, cancelling...');
       return 'cancelled';
     }
 
+    log('DEBUG', 'Prompting for output directory');
     const outputPathResponse = await prompts({
       type: 'text',
       name: 'path',
@@ -86,11 +97,13 @@ async function updateWebpMetadata() {
       validate: value => value.trim() !== '' ? true : 'Output directory required.'
     });
     const outputDir = outputPathResponse.path;
+    log('DEBUG', `Output directory provided: ${outputDir}`);
     if (!outputDir) {
       log('INFO', 'No output directory provided, cancelling...');
       return 'cancelled';
     }
 
+    log('DEBUG', 'Prompting for metadata input');
     const metadata = await prompts([
       { type: 'text', name: 'title', message: 'Enter title:', initial: 'Untitled' },
       { type: 'text', name: 'description', message: 'Enter description:', initial: '' },
@@ -99,9 +112,14 @@ async function updateWebpMetadata() {
       { type: 'text', name: 'genre', message: 'Enter genre:', initial: '' },
       { type: 'text', name: 'comment', message: 'Enter comment:', initial: '' }
     ]);
+    log('DEBUG', `Metadata collected: ${JSON.stringify(metadata)}`);
 
+    log('DEBUG', `Creating output directory: ${outputDir}`);
     await fsPromises.mkdir(outputDir, { recursive: true });
+    log('DEBUG', `Output directory created or verified: ${outputDir}`);
+
     const stats = await fsPromises.stat(inputPath);
+    log('DEBUG', `Input path stats: ${stats.isFile() ? 'File' : 'Directory'}`);
 
     if (stats.isFile()) {
       if (!inputPath.toLowerCase().endsWith('.webp')) {
@@ -109,10 +127,12 @@ async function updateWebpMetadata() {
         return 'error';
       }
       const outputFile = path.join(outputDir, path.basename(inputPath));
-      await processWebpFile(inputPath, outputFile, metadata);
+      await processWebpFile(inputFile, outputFile, metadata);
     } else if (stats.isDirectory()) {
+      log('DEBUG', `Reading directory: ${inputPath}`);
       const files = await fsPromises.readdir(inputPath);
       const webpFiles = files.filter(f => f.toLowerCase().endsWith('.webp'));
+      log('DEBUG', `Found ${webpFiles.length} WebP files: ${webpFiles.join(', ')}`);
       if (webpFiles.length === 0) {
         log('INFO', 'No WebP files found in the directory.');
         return 'success';
@@ -125,9 +145,11 @@ async function updateWebpMetadata() {
       log('INFO', `Processed ${webpFiles.length} WebP files.`);
     }
 
+    log('DEBUG', 'Update WebP Metadata completed successfully');
     return 'success';
   } catch (error) {
     log('ERROR', `Unexpected error in Update WebP Metadata: ${error.message}`);
+    log('DEBUG', `Error stack: ${error.stack}`);
     return 'error';
   }
 }
