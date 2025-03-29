@@ -5,36 +5,74 @@ const fs = require('fs').promises;
 const path = require('path');
 const { log } = require('../../backend/utils/logUtils');
 
-async function sortFilesByExtension() {
+function parseArgs(args) {
+  const params = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith('--')) {
+      const flag = args[i].slice(2);
+      const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
+      params[flag] = value;
+      i++;
+    }
+  }
+  return params;
+}
+
+async function sortFilesByExtension(args = process.argv.slice(2)) {
   try {
     log('INFO', 'Starting Sort Files By Extension Feature');
 
-    log('DEBUG', 'Prompting for input directory');
-    const inputDirResponse = await prompts({
-      type: 'text',
-      name: 'dir',
-      message: 'Enter the directory containing files to sort (or press Enter to cancel):',
-      validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Directory not found.'
-    });
-    const inputDir = inputDirResponse.dir;
-    log('DEBUG', `Input directory provided: ${inputDir}`);
-    if (!inputDir) {
-      log('INFO', 'No input directory provided, cancelling...');
-      return 'cancelled';
+    const params = parseArgs(args);
+    const hasArgs = Object.keys(params).length > 0;
+
+    let inputDir;
+    if (params['input']) {
+      inputDir = params['input'];
+      if (!await fs.stat(inputDir).then(stats => stats.isDirectory()).catch(() => false)) {
+        log('ERROR', `Input path not found or not a directory: ${inputDir}`);
+        return 'error';
+      }
+      log('DEBUG', `Input directory from args: ${inputDir}`);
+    } else if (!hasArgs) {
+      log('DEBUG', 'Prompting for input directory');
+      const inputDirResponse = await prompts({
+        type: 'text',
+        name: 'dir',
+        message: 'Enter the directory containing files to sort (or press Enter to cancel):',
+        validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Directory not found.'
+      });
+      inputDir = inputDirResponse.dir;
+      log('DEBUG', `Input directory provided: ${inputDir}`);
+      if (!inputDir) {
+        log('INFO', 'No input directory provided, cancelling...');
+        return 'cancelled';
+      }
+    } else {
+      log('ERROR', 'Missing required --input argument');
+      return 'error';
     }
 
-    log('DEBUG', 'Prompting for output directory');
-    const outputDirResponse = await prompts({
-      type: 'text',
-      name: 'dir',
-      message: 'Enter the output directory to sort files into (or press Enter to cancel):',
-      validate: value => value.trim() !== '' ? true : 'Output directory required.'
-    });
-    const outputDir = outputDirResponse.dir;
-    log('DEBUG', `Output directory provided: ${outputDir}`);
-    if (!outputDir) {
-      log('INFO', 'No output directory provided, cancelling...');
-      return 'cancelled';
+    let outputDir;
+    if (params['output']) {
+      outputDir = params['output'];
+      log('DEBUG', `Output directory from args: ${outputDir}`);
+    } else if (!hasArgs) {
+      log('DEBUG', 'Prompting for output directory');
+      const outputDirResponse = await prompts({
+        type: 'text',
+        name: 'dir',
+        message: 'Enter the output directory to sort files into (or press Enter to cancel):',
+        validate: value => value.trim() !== '' ? true : 'Output directory required.'
+      });
+      outputDir = outputDirResponse.dir;
+      log('DEBUG', `Output directory provided: ${outputDir}`);
+      if (!outputDir) {
+        log('INFO', 'No output directory provided, cancelling...');
+        return 'cancelled';
+      }
+    } else {
+      log('ERROR', 'Missing required --output argument');
+      return 'error';
     }
 
     log('DEBUG', `Creating output directory: ${outputDir}`);
@@ -95,6 +133,15 @@ async function sortFilesByExtension() {
     log('DEBUG', `Error stack: ${error.stack}`);
     return 'error';
   }
+}
+
+if (require.main === module) {
+  sortFilesByExtension().then(result => {
+    process.exit(result === 'success' ? 0 : 1);
+  }).catch(err => {
+    log('ERROR', `Fatal error: ${err.message}`);
+    process.exit(1);
+  });
 }
 
 module.exports = { sortFilesByExtension };

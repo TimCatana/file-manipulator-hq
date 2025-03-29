@@ -63,36 +63,74 @@ async function processVideo(inputPath, outputPath, width, height, method) {
   });
 }
 
-async function resizeVideos() {
+function parseArgs(args) {
+  const params = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith('--')) {
+      const flag = args[i].slice(2);
+      const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
+      params[flag] = value;
+      i++;
+    }
+  }
+  return params;
+}
+
+async function resizeVideos(args = process.argv.slice(2)) {
   try {
     log('INFO', 'Starting Video Resize Feature');
 
-    log('DEBUG', 'Prompting for input path');
-    const inputPathResponse = await prompts({
-      type: 'text',
-      name: 'path',
-      message: 'Enter the path to the input video file or directory (or press Enter to cancel):',
-      validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Path not found.'
-    });
-    const inputPath = inputPathResponse.path;
-    log('DEBUG', `Input path provided: ${inputPath}`);
-    if (!inputPath) {
-      log('INFO', 'No input path provided, cancelling...');
-      return 'cancelled';
+    const params = parseArgs(args);
+    const hasArgs = Object.keys(params).length > 0;
+
+    let inputPath;
+    if (params['input']) {
+      inputPath = params['input'];
+      if (!fs.existsSync(inputPath)) {
+        log('ERROR', `Input path not found: ${inputPath}`);
+        return 'error';
+      }
+      log('DEBUG', `Input path from args: ${inputPath}`);
+    } else if (!hasArgs) {
+      log('DEBUG', 'Prompting for input path');
+      const inputPathResponse = await prompts({
+        type: 'text',
+        name: 'path',
+        message: 'Enter the path to the input video file or directory (or press Enter to cancel):',
+        validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Path not found.'
+      });
+      inputPath = inputPathResponse.path;
+      log('DEBUG', `Input path provided: ${inputPath}`);
+      if (!inputPath) {
+        log('INFO', 'No input path provided, cancelling...');
+        return 'cancelled';
+      }
+    } else {
+      log('ERROR', 'Missing required --input argument');
+      return 'error';
     }
 
-    log('DEBUG', 'Prompting for output directory');
-    const outputPathResponse = await prompts({
-      type: 'text',
-      name: 'path',
-      message: 'Enter the path for the output directory (or press Enter to cancel):',
-      validate: value => value.trim() !== '' ? true : 'Output directory required.'
-    });
-    const outputDir = outputPathResponse.path;
-    log('DEBUG', `Output directory provided: ${outputDir}`);
-    if (!outputDir) {
-      log('INFO', 'No output directory provided, cancelling...');
-      return 'cancelled';
+    let outputDir;
+    if (params['output']) {
+      outputDir = params['output'];
+      log('DEBUG', `Output directory from args: ${outputDir}`);
+    } else if (!hasArgs) {
+      log('DEBUG', 'Prompting for output directory');
+      const outputPathResponse = await prompts({
+        type: 'text',
+        name: 'path',
+        message: 'Enter the path for the output directory (or press Enter to cancel):',
+        validate: value => value.trim() !== '' ? true : 'Output directory required.'
+      });
+      outputDir = outputPathResponse.path;
+      log('DEBUG', `Output directory provided: ${outputDir}`);
+      if (!outputDir) {
+        log('INFO', 'No output directory provided, cancelling...');
+        return 'cancelled';
+      }
+    } else {
+      log('ERROR', 'Missing required --output argument');
+      return 'error';
     }
 
     log('DEBUG', `Creating output directory: ${outputDir}`);
@@ -102,55 +140,71 @@ async function resizeVideos() {
     const stats = await fs.stat(inputPath);
     log('DEBUG', `Input path stats: ${stats.isFile() ? 'File' : 'Directory'}`);
 
-    const formatChoices = [
-      { title: 'Vertical (1080x1920)', value: { width: 1080, height: 1920 } },
-      { title: 'Custom size', value: 'custom' },
-    ];
+    let width, height, method;
+    if (hasArgs) {
+      if (!params['width'] || !params['height'] || !params['method']) {
+        log('ERROR', 'Missing required arguments: --width, --height, and --method are required when using arguments');
+        return 'error';
+      }
+      width = parseInt(params['width'], 10);
+      height = parseInt(params['height'], 10);
+      method = params['method'];
+      if (isNaN(width) || width <= 0 || isNaN(height) || height <= 0 || !['stretch', 'crop', 'contain'].includes(method)) {
+        log('ERROR', 'Invalid arguments: --width and --height must be positive numbers, --method must be stretch, crop, or contain');
+        return 'error';
+      }
+      log('DEBUG', `Resize parameters from args: width=${width}, height=${height}, method=${method}`);
+    } else {
+      const formatChoices = [
+        { title: 'Vertical (1080x1920)', value: { width: 1080, height: 1920 } },
+        { title: 'Custom size', value: 'custom' },
+      ];
 
-    log('DEBUG', 'Prompting for resize options');
-    const resizeResponse = await prompts([
-      {
-        type: 'select',
-        name: 'format',
-        message: 'Choose output format:',
-        choices: formatChoices,
-        initial: 0,
-      },
-      {
-        type: prev => (prev === 'custom' ? 'number' : null),
-        name: 'width',
-        message: 'Enter custom width in pixels:',
-        validate: value => value > 0 ? true : 'Width must be greater than 0',
-      },
-      {
-        type: prev => (prev === 'custom' ? 'number' : null),
-        name: 'height',
-        message: 'Enter custom height in pixels:',
-        validate: value => value > 0 ? true : 'Height must be greater than 0',
-      },
-      {
-        type: 'select',
-        name: 'method',
-        message: 'Choose resize method:',
-        choices: [
-          { title: 'Crop (cuts to fit)', value: 'crop' },
-          { title: 'Stretch (distorts to fit)', value: 'stretch' },
-          { title: 'Contain (letterboxed)', value: 'contain' },
-        ],
-        initial: 0,
-      },
-    ]);
+      log('DEBUG', 'Prompting for resize options');
+      const resizeResponse = await prompts([
+        {
+          type: 'select',
+          name: 'format',
+          message: 'Choose output format:',
+          choices: formatChoices,
+          initial: 0,
+        },
+        {
+          type: prev => (prev === 'custom' ? 'number' : null),
+          name: 'width',
+          message: 'Enter custom width in pixels:',
+          validate: value => value > 0 ? true : 'Width must be greater than 0',
+        },
+        {
+          type: prev => (prev === 'custom' ? 'number' : null),
+          name: 'height',
+          message: 'Enter custom height in pixels:',
+          validate: value => value > 0 ? true : 'Height must be greater than 0',
+        },
+        {
+          type: 'select',
+          name: 'method',
+          message: 'Choose resize method:',
+          choices: [
+            { title: 'Crop (cuts to fit)', value: 'crop' },
+            { title: 'Stretch (distorts to fit)', value: 'stretch' },
+            { title: 'Contain (letterboxed)', value: 'contain' },
+          ],
+          initial: 0,
+        },
+      ]);
 
-    log('DEBUG', `Resize options selected: ${JSON.stringify(resizeResponse)}`);
-    if (!resizeResponse.format) {
-      log('INFO', 'Resize options cancelled.');
-      return 'cancelled';
+      log('DEBUG', `Resize options selected: ${JSON.stringify(resizeResponse)}`);
+      if (!resizeResponse.format) {
+        log('INFO', 'Resize options cancelled.');
+        return 'cancelled';
+      }
+
+      width = resizeResponse.format === 'custom' ? resizeResponse.width : resizeResponse.format.width;
+      height = resizeResponse.format === 'custom' ? resizeResponse.height : resizeResponse.format.height;
+      method = resizeResponse.method;
+      log('DEBUG', `Resize parameters: width=${width}, height=${height}, method=${method}`);
     }
-
-    const width = resizeResponse.format === 'custom' ? resizeResponse.width : resizeResponse.format.width;
-    const height = resizeResponse.format === 'custom' ? resizeResponse.height : resizeResponse.format.height;
-    const method = resizeResponse.method;
-    log('DEBUG', `Resize parameters: width=${width}, height=${height}, method=${method}`);
 
     let processed = 0, failed = 0;
 
@@ -192,6 +246,15 @@ async function resizeVideos() {
     log('DEBUG', `Error stack: ${error.stack}`);
     return 'error';
   }
+}
+
+if (require.main === module) {
+  resizeVideos().then(result => {
+    process.exit(result === 'success' ? 0 : 1);
+  }).catch(err => {
+    log('ERROR', `Fatal error: ${err.message}`);
+    process.exit(1);
+  });
 }
 
 module.exports = { resizeVideos };

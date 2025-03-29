@@ -28,36 +28,74 @@ async function processWebmToMp4(inputFile, outputFile) {
   });
 }
 
-async function convertWebmToMp4() {
+function parseArgs(args) {
+  const params = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith('--')) {
+      const flag = args[i].slice(2);
+      const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
+      params[flag] = value;
+      i++;
+    }
+  }
+  return params;
+}
+
+async function convertWebmToMp4(args = process.argv.slice(2)) {
   try {
     log('INFO', 'Starting WebM to MP4 Conversion Feature');
 
-    log('DEBUG', 'Prompting for input path');
-    const inputPathResponse = await prompts({
-      type: 'text',
-      name: 'path',
-      message: 'Enter the path to the input WebM file or directory (or press Enter to cancel):',
-      validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Path not found.'
-    });
-    const inputPath = inputPathResponse.path;
-    log('DEBUG', `Input path provided: ${inputPath}`);
-    if (!inputPath) {
-      log('INFO', 'No input path provided, cancelling...');
-      return 'cancelled';
+    const params = parseArgs(args);
+    const hasArgs = Object.keys(params).length > 0;
+
+    let inputPath;
+    if (params['input']) {
+      inputPath = params['input'];
+      if (!fs.existsSync(inputPath)) {
+        log('ERROR', `Input path not found: ${inputPath}`);
+        return 'error';
+      }
+      log('DEBUG', `Input path from args: ${inputPath}`);
+    } else if (!hasArgs) {
+      log('DEBUG', 'Prompting for input path');
+      const inputPathResponse = await prompts({
+        type: 'text',
+        name: 'path',
+        message: 'Enter the path to the input WebM file or directory (or press Enter to cancel):',
+        validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Path not found.'
+      });
+      inputPath = inputPathResponse.path;
+      log('DEBUG', `Input path provided: ${inputPath}`);
+      if (!inputPath) {
+        log('INFO', 'No input path provided, cancelling...');
+        return 'cancelled';
+      }
+    } else {
+      log('ERROR', 'Missing required --input argument');
+      return 'error';
     }
 
-    log('DEBUG', 'Prompting for output directory');
-    const outputPathResponse = await prompts({
-      type: 'text',
-      name: 'path',
-      message: 'Enter the path for the output directory (or press Enter to cancel):',
-      validate: value => value.trim() !== '' ? true : 'Output directory required.'
-    });
-    const outputDir = outputPathResponse.path;
-    log('DEBUG', `Output directory provided: ${outputDir}`);
-    if (!outputDir) {
-      log('INFO', 'No output directory provided, cancelling...');
-      return 'cancelled';
+    let outputDir;
+    if (params['output']) {
+      outputDir = params['output'];
+      log('DEBUG', `Output directory from args: ${outputDir}`);
+    } else if (!hasArgs) {
+      log('DEBUG', 'Prompting for output directory');
+      const outputPathResponse = await prompts({
+        type: 'text',
+        name: 'path',
+        message: 'Enter the path for the output directory (or press Enter to cancel):',
+        validate: value => value.trim() !== '' ? true : 'Output directory required.'
+      });
+      outputDir = outputPathResponse.path;
+      log('DEBUG', `Output directory provided: ${outputDir}`);
+      if (!outputDir) {
+        log('INFO', 'No output directory provided, cancelling...');
+        return 'cancelled';
+      }
+    } else {
+      log('ERROR', 'Missing required --output argument');
+      return 'error';
     }
 
     log('DEBUG', `Creating output directory: ${outputDir}`);
@@ -100,6 +138,15 @@ async function convertWebmToMp4() {
     log('DEBUG', `Error stack: ${error.stack}`);
     return 'error';
   }
+}
+
+if (require.main === module) {
+  convertWebmToMp4().then(result => {
+    process.exit(result === 'success' ? 0 : 1);
+  }).catch(err => {
+    log('ERROR', `Fatal error: ${err.message}`);
+    process.exit(1);
+  });
 }
 
 module.exports = { convertWebmToMp4 };

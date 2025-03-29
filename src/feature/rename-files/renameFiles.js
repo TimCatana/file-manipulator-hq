@@ -5,44 +5,84 @@ const fs = require('fs').promises;
 const path = require('path');
 const { log } = require('../../backend/utils/logUtils');
 
-async function renameFiles() {
+function parseArgs(args) {
+  const params = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith('--')) {
+      const flag = args[i].slice(2);
+      const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
+      params[flag] = value;
+      i++;
+    }
+  }
+  return params;
+}
+
+async function renameFiles(args = process.argv.slice(2)) {
   try {
     log('INFO', 'Starting Rename Files Feature');
 
-    log('DEBUG', 'Prompting for input directory');
-    const inputDirResponse = await prompts({
-      type: 'text',
-      name: 'dir',
-      message: 'Enter the directory containing files to rename (or press Enter to cancel):',
-      validate: async (value) => {
-        if (value.trim() === '') return true;
-        try {
-          await fs.access(value);
-          return true;
-        } catch {
-          return 'Directory not found.';
-        }
+    const params = parseArgs(args);
+    const hasArgs = Object.keys(params).length > 0;
+
+    let inputDir;
+    if (params['input']) {
+      inputDir = params['input'];
+      try {
+        await fs.access(inputDir);
+        log('DEBUG', `Input directory from args: ${inputDir}`);
+      } catch {
+        log('ERROR', `Input directory not found: ${inputDir}`);
+        return 'error';
       }
-    });
-    const inputDir = inputDirResponse.dir;
-    log('DEBUG', `Input directory provided: ${inputDir}`);
-    if (!inputDir) {
-      log('INFO', 'No input directory provided, cancelling...');
-      return 'cancelled';
+    } else if (!hasArgs) {
+      log('DEBUG', 'Prompting for input directory');
+      const inputDirResponse = await prompts({
+        type: 'text',
+        name: 'dir',
+        message: 'Enter the directory containing files to rename (or press Enter to cancel):',
+        validate: async (value) => {
+          if (value.trim() === '') return true;
+          try {
+            await fs.access(value);
+            return true;
+          } catch {
+            return 'Directory not found.';
+          }
+        }
+      });
+      inputDir = inputDirResponse.dir;
+      log('DEBUG', `Input directory provided: ${inputDir}`);
+      if (!inputDir) {
+        log('INFO', 'No input directory provided, cancelling...');
+        return 'cancelled';
+      }
+    } else {
+      log('ERROR', 'Missing required --input argument');
+      return 'error';
     }
 
-    log('DEBUG', 'Prompting for base name');
-    const fileNameBaseResponse = await prompts({
-      type: 'text',
-      name: 'base',
-      message: 'Enter the base name for renamed files (e.g., "file" becomes "file-1", "file-2", etc.):',
-      validate: value => value.trim() !== '' ? true : 'Base name required.'
-    });
-    const fileNameBase = fileNameBaseResponse.base;
-    log('DEBUG', `Base name provided: ${fileNameBase}`);
-    if (!fileNameBase) {
-      log('INFO', 'No base name provided, cancelling...');
-      return 'cancelled';
+    let fileNameBase;
+    if (params['base']) {
+      fileNameBase = params['base'];
+      log('DEBUG', `Base name from args: ${fileNameBase}`);
+    } else if (!hasArgs) {
+      log('DEBUG', 'Prompting for base name');
+      const fileNameBaseResponse = await prompts({
+        type: 'text',
+        name: 'base',
+        message: 'Enter the base name for renamed files (e.g., "file" becomes "file-1", "file-2", etc.):',
+        validate: value => value.trim() !== '' ? true : 'Base name required.'
+      });
+      fileNameBase = fileNameBaseResponse.base;
+      log('DEBUG', `Base name provided: ${fileNameBase}`);
+      if (!fileNameBase) {
+        log('INFO', 'No base name provided, cancelling...');
+        return 'cancelled';
+      }
+    } else {
+      log('ERROR', 'Missing required --base argument');
+      return 'error';
     }
 
     // Read directory and filter files asynchronously
@@ -95,6 +135,15 @@ async function renameFiles() {
     log('DEBUG', `Error stack: ${error.stack}`);
     return 'error';
   }
+}
+
+if (require.main === module) {
+  renameFiles().then(result => {
+    process.exit(result === 'success' ? 0 : 1);
+  }).catch(err => {
+    log('ERROR', `Fatal error: ${err.message}`);
+    process.exit(1);
+  });
 }
 
 module.exports = { renameFiles };

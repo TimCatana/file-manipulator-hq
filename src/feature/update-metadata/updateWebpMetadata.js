@@ -66,7 +66,21 @@ async function processWebpFile(inputFile, outputFile, metadata) {
   log('INFO', `Success: Metadata updated for ${outputFile}`);
 }
 
-async function updateWebpMetadata() {
+// Parse command-line arguments
+function parseArgs(args) {
+  const params = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith('--')) {
+      const flag = args[i].slice(2);
+      const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
+      params[flag] = value;
+      i++; // Skip the value
+    }
+  }
+  return params;
+}
+
+async function updateWebpMetadata(args = process.argv.slice(2)) {
   try {
     log('INFO', 'Starting Update WebP Metadata Feature');
 
@@ -75,44 +89,93 @@ async function updateWebpMetadata() {
       return 'error';
     }
 
-    log('DEBUG', 'Prompting for input path');
-    const inputPathResponse = await prompts({
-      type: 'text',
-      name: 'path',
-      message: 'Enter the path to the input WebP file or directory (or press Enter to cancel):',
-      validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Path not found.'
-    });
-    const inputPath = inputPathResponse.path;
-    log('DEBUG', `Input path provided: ${inputPath}`);
-    if (!inputPath) {
-      log('INFO', 'No input path provided, cancelling...');
-      return 'cancelled';
+    const params = parseArgs(args);
+    const hasArgs = Object.keys(params).length > 0;
+
+    // Input path
+    let inputPath;
+    if (params['input']) {
+      inputPath = params['input'];
+      if (!fs.existsSync(inputPath)) {
+        log('ERROR', `Input path not found: ${inputPath}`);
+        return 'error';
+      }
+      log('DEBUG', `Input path from args: ${inputPath}`);
+    } else if (!hasArgs) {
+      log('DEBUG', 'Prompting for input path');
+      const inputPathResponse = await prompts({
+        type: 'text',
+        name: 'path',
+        message: 'Enter the path to the input WebP file or directory (or press Enter to cancel):',
+        validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Path not found.'
+      });
+      inputPath = inputPathResponse.path;
+      log('DEBUG', `Input path provided: ${inputPath}`);
+      if (!inputPath) {
+        log('INFO', 'No input path provided, cancelling...');
+        return 'cancelled';
+      }
+    } else {
+      log('ERROR', 'Missing required --input argument');
+      return 'error';
     }
 
-    log('DEBUG', 'Prompting for output directory');
-    const outputPathResponse = await prompts({
-      type: 'text',
-      name: 'path',
-      message: 'Enter the path for the output directory (or press Enter to cancel):',
-      validate: value => value.trim() !== '' ? true : 'Output directory required.'
-    });
-    const outputDir = outputPathResponse.path;
-    log('DEBUG', `Output directory provided: ${outputDir}`);
-    if (!outputDir) {
-      log('INFO', 'No output directory provided, cancelling...');
-      return 'cancelled';
+    // Output directory
+    let outputDir;
+    if (params['output']) {
+      outputDir = params['output'];
+      log('DEBUG', `Output directory from args: ${outputDir}`);
+    } else if (!hasArgs) {
+      log('DEBUG', 'Prompting for output directory');
+      const outputPathResponse = await prompts({
+        type: 'text',
+        name: 'path',
+        message: 'Enter the path for the output directory (or press Enter to cancel):',
+        validate: value => value.trim() !== '' ? true : 'Output directory required.'
+      });
+      outputDir = outputPathResponse.path;
+      log('DEBUG', `Output directory provided: ${outputDir}`);
+      if (!outputDir) {
+        log('INFO', 'No output directory provided, cancelling...');
+        return 'cancelled';
+      }
+    } else {
+      log('ERROR', 'Missing required --output argument');
+      return 'error';
     }
 
-    log('DEBUG', 'Prompting for metadata input');
-    const metadata = await prompts([
-      { type: 'text', name: 'title', message: 'Enter title:', initial: 'Untitled' },
-      { type: 'text', name: 'description', message: 'Enter description:', initial: '' },
-      { type: 'text', name: 'keywords', message: 'Enter keywords (comma-separated):', initial: '' },
-      { type: 'text', name: 'copyright', message: 'Enter copyright:', initial: '' },
-      { type: 'text', name: 'genre', message: 'Enter genre:', initial: '' },
-      { type: 'text', name: 'comment', message: 'Enter comment:', initial: '' }
-    ]);
-    log('DEBUG', `Metadata collected: ${JSON.stringify(metadata)}`);
+    // Metadata
+    const defaultMetadata = {
+      title: 'Untitled',
+      description: '',
+      keywords: '',
+      copyright: '',
+      genre: '',
+      comment: ''
+    };
+    let metadata;
+    if (hasArgs) {
+      metadata = {
+        title: params['title'] || defaultMetadata.title,
+        description: params['description'] || defaultMetadata.description,
+        keywords: params['keywords'] || defaultMetadata.keywords,
+        copyright: params['copyright'] || defaultMetadata.copyright,
+        genre: params['genre'] || defaultMetadata.genre,
+        comment: params['comment'] || defaultMetadata.comment
+      };
+      log('DEBUG', `Metadata from args: ${JSON.stringify(metadata)}`);
+    } else {
+      log('DEBUG', 'Prompting for metadata input');
+      metadata = await prompts([
+        { type: 'text', name: 'title', message: 'Enter title:', initial: defaultMetadata.title },
+        { type: 'text', name: 'description', message: 'Enter description:', initial: defaultMetadata.description },
+        { type: 'text', name: 'keywords', message: 'Enter keywords (comma-separated):', initial: defaultMetadata.keywords },
+        { type: 'text', name: 'copyright', message: 'Enter copyright:', initial: defaultMetadata.copyright },
+        { type: 'text', name: 'genre', message: 'Enter genre:', initial: defaultMetadata.genre },
+        { type: 'text', name: 'comment', message: 'Enter comment:', initial: defaultMetadata.comment }
+      ]);
+      log('DEBUG', `Metadata collected: ${JSON.stringify(metadata)}`);
+    }
 
     log('DEBUG', `Creating output directory: ${outputDir}`);
     await fsPromises.mkdir(outputDir, { recursive: true });
@@ -127,7 +190,7 @@ async function updateWebpMetadata() {
         return 'error';
       }
       const outputFile = path.join(outputDir, path.basename(inputPath));
-      await processWebpFile(inputFile, outputFile, metadata);
+      await processWebpFile(inputPath, outputFile, metadata);
     } else if (stats.isDirectory()) {
       log('DEBUG', `Reading directory: ${inputPath}`);
       const files = await fsPromises.readdir(inputPath);
@@ -152,6 +215,20 @@ async function updateWebpMetadata() {
     log('DEBUG', `Error stack: ${error.stack}`);
     return 'error';
   }
+}
+
+// Main entry point for direct execution
+if (require.main === module) {
+  updateWebpMetadata().then(result => {
+    if (result === 'success') {
+      process.exit(0);
+    } else {
+      process.exit(1);
+    }
+  }).catch(err => {
+    log('ERROR', `Fatal error: ${err.message}`);
+    process.exit(1);
+  });
 }
 
 module.exports = { updateWebpMetadata };
