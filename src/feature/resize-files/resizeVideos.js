@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 const prompts = require('prompts');
-const fs = require('fs').promises;
+const fsPromises = require('fs').promises; // For async operations
+const fs = require('fs'); // For sync operations like existsSync
 const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
 const { log } = require('../../backend/utils/logUtils');
@@ -133,10 +134,10 @@ async function resizeVideos(args = process.argv.slice(2)) {
     }
 
     log('DEBUG', `Creating output directory: ${outputDir}`);
-    await fs.mkdir(outputDir, { recursive: true });
+    await fsPromises.mkdir(outputDir, { recursive: true });
     log('DEBUG', `Output directory created or verified: ${outputDir}`);
 
-    const stats = await fs.stat(inputPath);
+    const stats = await fsPromises.stat(inputPath);
     log('DEBUG', `Input path stats: ${stats.isFile() ? 'File' : 'Directory'}`);
 
     let width, height, method;
@@ -255,7 +256,7 @@ async function resizeVideos(args = process.argv.slice(2)) {
       else failed++;
     } else if (stats.isDirectory()) {
       log('DEBUG', `Reading directory: ${inputPath}`);
-      const files = await fs.readdir(inputPath);
+      const files = await fsPromises.readdir(inputPath);
       const videoFiles = files.filter(f => SUPPORTED_EXTENSIONS.includes(path.extname(f).toLowerCase()));
       log('DEBUG', `Found ${videoFiles.length} supported video files: ${videoFiles.join(', ')}`);
       if (videoFiles.length === 0) {
