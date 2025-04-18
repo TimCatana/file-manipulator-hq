@@ -2,6 +2,7 @@
 
 const prompts = require('prompts');
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const { log } = require('../../../backend/utils/logUtils');
@@ -15,15 +16,20 @@ async function processWebpToPng(inputFile, outputFile) {
         log('ERROR', `dwebp error: ${error.message}`);
         log('DEBUG', `dwebp error stack: ${error.stack}`);
         reject(error);
-      } else if (stderr && !stderr.includes('Decoding')) {
+        return;
+      }
+      if (stderr && stderr.toLowerCase().includes('error')) {
         log('ERROR', `dwebp stderr: ${stderr}`);
         log('DEBUG', `dwebp stderr details: ${stderr}`);
         reject(new Error(stderr));
-      } else {
-        log('INFO', `Converted ${path.basename(inputFile)} to ${path.basename(outputFile)}`);
-        log('DEBUG', `Conversion successful: ${inputFile} -> ${outputFile}`);
-        resolve();
+        return;
       }
+      if (stderr) {
+        log('DEBUG', `dwebp stderr (informational): ${stderr}`);
+      }
+      log('INFO', `Converted ${path.basename(inputFile)} to ${path.basename(outputFile)}`);
+      log('DEBUG', `Conversion successful: ${inputFile} -> ${outputFile}`);
+      resolve();
     });
   });
 }
@@ -46,6 +52,15 @@ function parseArgs(args) {
   return params;
 }
 
+async function pathExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function convertWebpToPng(args = process.argv.slice(2)) {
   try {
     log('INFO', 'Starting WebP to PNG Conversion Feature');
@@ -56,7 +71,7 @@ async function convertWebpToPng(args = process.argv.slice(2)) {
     let inputPath;
     if (params['input']) {
       inputPath = params['input'];
-      if (!fs.existsSync(inputPath)) {
+      if (!(await pathExists(inputPath))) {
         log('ERROR', `Input path not found: ${inputPath}`);
         return 'error';
       }
@@ -67,7 +82,10 @@ async function convertWebpToPng(args = process.argv.slice(2)) {
         type: 'text',
         name: 'path',
         message: 'Enter the path to the input WebP file or directory (or press Enter to cancel):',
-        validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Path not found.'
+        validate: async value => {
+          if (value.trim() === '') return true;
+          return (await pathExists(value)) ? true : 'Path not found.';
+        },
       });
       inputPath = inputPathResponse.path;
       log('DEBUG', `Input path provided: ${inputPath}`);
@@ -87,7 +105,7 @@ async function convertWebpToPng(args = process.argv.slice(2)) {
         type: 'text',
         name: 'path',
         message: 'Enter the path for the output directory (or press Enter to cancel):',
-        validate: value => value.trim() !== '' ? true : 'Output directory required.'
+        validate: value => (value.trim() !== '' ? true : 'Output directory required.'),
       });
       outputDir = outputPathResponse.path;
       log('DEBUG', `Output directory provided: ${outputDir}`);

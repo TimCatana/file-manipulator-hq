@@ -15,15 +15,20 @@ async function processJpgToWebp(inputFile, outputFile) {
         log('ERROR', `cwebp error: ${error.message}`);
         log('DEBUG', `cwebp error stack: ${error.stack}`);
         reject(error);
-      } else if (stderr && !stderr.includes('Saving file')) {
+        return;
+      }
+      if (stderr && stderr.toLowerCase().includes('error')) {
         log('ERROR', `cwebp stderr: ${stderr}`);
         log('DEBUG', `cwebp stderr details: ${stderr}`);
         reject(new Error(stderr));
-      } else {
-        log('INFO', `Converted ${path.basename(inputFile)} to ${path.basename(outputFile)}`);
-        log('DEBUG', `Conversion successful: ${inputFile} -> ${outputFile}`);
-        resolve();
+        return;
       }
+      if (stderr) {
+        log('DEBUG', `cwebp stderr (informational): ${stderr}`);
+      }
+      log('INFO', `Converted ${path.basename(inputFile)} to ${path.basename(outputFile)}`);
+      log('DEBUG', `Conversion successful: ${inputFile} -> ${outputFile}`);
+      resolve();
     });
   });
 }
@@ -46,6 +51,15 @@ function parseArgs(args) {
   return params;
 }
 
+async function pathExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function convertJpgToWebp(args = process.argv.slice(2)) {
   try {
     log('INFO', 'Starting JPG to WebP Conversion Feature');
@@ -56,7 +70,7 @@ async function convertJpgToWebp(args = process.argv.slice(2)) {
     let inputPath;
     if (params['input']) {
       inputPath = params['input'];
-      if (!fs.existsSync(inputPath)) {
+      if (!(await pathExists(inputPath))) {
         log('ERROR', `Input path not found: ${inputPath}`);
         return 'error';
       }
@@ -67,7 +81,10 @@ async function convertJpgToWebp(args = process.argv.slice(2)) {
         type: 'text',
         name: 'path',
         message: 'Enter the path to the input JPG file or directory (or press Enter to cancel):',
-        validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Path not found.'
+        validate: async value => {
+          if (value.trim() === '') return true;
+          return (await pathExists(value)) ? true : 'Path not found.';
+        },
       });
       inputPath = inputPathResponse.path;
       log('DEBUG', `Input path provided: ${inputPath}`);
@@ -87,7 +104,7 @@ async function convertJpgToWebp(args = process.argv.slice(2)) {
         type: 'text',
         name: 'path',
         message: 'Enter the path for the output directory (or press Enter to cancel):',
-        validate: value => value.trim() !== '' ? true : 'Output directory required.'
+        validate: value => (value.trim() !== '' ? true : 'Output directory required.'),
       });
       outputDir = outputPathResponse.path;
       log('DEBUG', `Output directory provided: ${outputDir}`);

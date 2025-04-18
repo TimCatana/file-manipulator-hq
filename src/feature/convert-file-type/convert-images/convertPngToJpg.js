@@ -15,15 +15,20 @@ async function processPngToJpg(inputFile, outputFile) {
         log('ERROR', `ffmpeg error: ${error.message}`);
         log('DEBUG', `FFmpeg error stack: ${error.stack}`);
         reject(error);
-      } else if (stderr && !stderr.includes('frame=')) {
+        return;
+      }
+      if (stderr && stderr.toLowerCase().includes('error')) {
         log('ERROR', `ffmpeg stderr: ${stderr}`);
         log('DEBUG', `FFmpeg stderr details: ${stderr}`);
         reject(new Error(stderr));
-      } else {
-        log('INFO', `Converted ${path.basename(inputFile)} to ${path.basename(outputFile)}`);
-        log('DEBUG', `Conversion successful: ${inputFile} -> ${outputFile}`);
-        resolve();
+        return;
       }
+      if (stderr) {
+        log('DEBUG', `FFmpeg stderr (informational): ${stderr}`);
+      }
+      log('INFO', `Converted ${path.basename(inputFile)} to ${path.basename(outputFile)}`);
+      log('DEBUG', `Conversion successful: ${inputFile} -> ${outputFile}`);
+      resolve();
     });
   });
 }
@@ -46,6 +51,15 @@ function parseArgs(args) {
   return params;
 }
 
+async function pathExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function convertPngToJpg(args = process.argv.slice(2)) {
   try {
     log('INFO', 'Starting PNG to JPG Conversion Feature');
@@ -56,7 +70,7 @@ async function convertPngToJpg(args = process.argv.slice(2)) {
     let inputPath;
     if (params['input']) {
       inputPath = params['input'];
-      if (!fs.existsSync(inputPath)) {
+      if (!(await pathExists(inputPath))) {
         log('ERROR', `Input path not found: ${inputPath}`);
         return 'error';
       }
@@ -67,7 +81,10 @@ async function convertPngToJpg(args = process.argv.slice(2)) {
         type: 'text',
         name: 'path',
         message: 'Enter the path to the input PNG file or directory (or press Enter to cancel):',
-        validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Path not found.'
+        validate: async value => {
+          if (value.trim() === '') return true;
+          return (await pathExists(value)) ? true : 'Path not found.';
+        },
       });
       inputPath = inputPathResponse.path;
       log('DEBUG', `Input path provided: ${inputPath}`);
@@ -87,7 +104,7 @@ async function convertPngToJpg(args = process.argv.slice(2)) {
         type: 'text',
         name: 'path',
         message: 'Enter the path for the output directory (or press Enter to cancel):',
-        validate: value => value.trim() !== '' ? true : 'Output directory required.'
+        validate: value => (value.trim() !== '' ? true : 'Output directory required.'),
       });
       outputDir = outputPathResponse.path;
       log('DEBUG', `Output directory provided: ${outputDir}`);
@@ -111,7 +128,7 @@ async function convertPngToJpg(args = process.argv.slice(2)) {
       }
       const outputFile = path.join(outputDir, path.basename(inputPath, '.png') + '.jpg');
       log('DEBUG', `Generated output filename: ${outputFile}`);
-      await processPngToJpg(inputPath, outputFile);
+      await processPngToJpg(inputFile, outputFile);
     } else if (stats.isDirectory()) {
       log('DEBUG', `Reading directory: ${inputPath}`);
       const files = await fs.readdir(inputPath);

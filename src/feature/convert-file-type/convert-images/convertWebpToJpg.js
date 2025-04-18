@@ -11,35 +11,55 @@ async function processWebpToJpg(inputFile, outputFile) {
   const command1 = `dwebp "${inputFile}" -o "${tempPng}"`;
   const command2 = `ffmpeg -i "${tempPng}" -vf "format=yuv420p" "${outputFile}" -y`;
   log('DEBUG', `Executing dwebp command: ${command1}`);
+  
   return new Promise((resolve, reject) => {
-    exec(command1, (error1, stdout1, stderr1) => {
+    exec(command1, async (error1, stdout1, stderr1) => {
       if (error1) {
         log('ERROR', `dwebp error: ${error1.message}`);
         log('DEBUG', `dwebp error stack: ${error1.stack}`);
         reject(error1);
-      } else if (stderr1 && !stderr1.includes('Decoding')) {
+        return;
+      }
+      if (stderr1 && stderr1.toLowerCase().includes('error')) {
         log('ERROR', `dwebp stderr: ${stderr1}`);
         log('DEBUG', `dwebp stderr details: ${stderr1}`);
         reject(new Error(stderr1));
-      } else {
-        log('DEBUG', `Executing FFmpeg command: ${command2}`);
-        exec(command2, (error2, stdout2, stderr2) => {
-          fs.unlinkSync(tempPng);
-          if (error2) {
-            log('ERROR', `ffmpeg error: ${error2.message}`);
-            log('DEBUG', `FFmpeg error stack: ${error2.stack}`);
-            reject(error2);
-          } else if (stderr2 && !stderr2.includes('frame=')) {
-            log('ERROR', `ffmpeg stderr: ${stderr2}`);
-            log('DEBUG', `FFmpeg stderr details: ${stderr2}`);
-            reject(new Error(stderr2));
-          } else {
-            log('INFO', ` converted ${path.basename(inputFile)} to ${path.basename(outputFile)}`);
-            log('DEBUG', `Conversion successful: ${inputFile} -> ${outputFile}`);
-            resolve();
-          }
-        });
+        return;
       }
+      if (stderr1) {
+        log('DEBUG', `dwebp stderr (informational): ${stderr1}`);
+      }
+
+      log('DEBUG', `Executing FFmpeg command: ${command2}`);
+      exec(command2, async (error2, stdout2, stderr2) => {
+        // Always attempt to delete the temporary PNG file
+        try {
+          await fs.unlink(tempPng);
+          log('DEBUG', `Deleted temporary file: ${tempPng}`);
+        } catch (unlinkError) {
+          log('WARN', `Failed to delete temporary file ${tempPng}: ${unlinkError.message}`);
+        }
+
+        if (error2) {
+          log('ERROR', `ffmpeg error: ${error2.message}`);
+          log('DEBUG', `FFmpeg error stack: ${error2.stack}`);
+          reject(error2);
+          return;
+        }
+        if (stderr2 && stderr2.toLowerCase().includes('error')) {
+          log('ERROR', `ffmpeg stderr: ${stderr2}`);
+          log('DEBUG', `FFmpeg stderr details: ${stderr2}`);
+          reject(new Error(stderr2));
+          return;
+        }
+        if (stderr2) {
+          log('DEBUG', `FFmpeg stderr (informational): ${stderr2}`);
+        }
+
+        log('INFO', `Converted ${path.basename(inputFile)} to ${path.basename(outputFile)}`);
+        log('DEBUG', `Conversion successful: ${inputFile} -> ${outputFile}`);
+        resolve();
+      });
     });
   });
 }
@@ -62,6 +82,15 @@ function parseArgs(args) {
   return params;
 }
 
+async function pathExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function convertWebpToJpg(args = process.argv.slice(2)) {
   try {
     log('INFO', 'Starting WebP to JPG Conversion Feature');
@@ -72,7 +101,7 @@ async function convertWebpToJpg(args = process.argv.slice(2)) {
     let inputPath;
     if (params['input']) {
       inputPath = params['input'];
-      if (!fs.existsSync(inputPath)) {
+      if (!(await pathExists(inputPath))) {
         log('ERROR', `Input path not found: ${inputPath}`);
         return 'error';
       }
@@ -83,7 +112,10 @@ async function convertWebpToJpg(args = process.argv.slice(2)) {
         type: 'text',
         name: 'path',
         message: 'Enter the path to the input WebP file or directory (or press Enter to cancel):',
-        validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Path not found.'
+        validate: async value => {
+          if (value.trim() === '') return true;
+          return (await pathExists(value)) ? true : 'Path not found.';
+        },
       });
       inputPath = inputPathResponse.path;
       log('DEBUG', `Input path provided: ${inputPath}`);
@@ -103,7 +135,7 @@ async function convertWebpToJpg(args = process.argv.slice(2)) {
         type: 'text',
         name: 'path',
         message: 'Enter the path for the output directory (or press Enter to cancel):',
-        validate: value => value.trim() !== '' ? true : 'Output directory required.'
+        validate: value => (value.trim() !== '' ? true : 'Output directory required.'),
       });
       outputDir = outputPathResponse.path;
       log('DEBUG', `Output directory provided: ${outputDir}`);
