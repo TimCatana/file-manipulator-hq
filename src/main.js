@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+require('dotenv').config();
 const prompts = require('prompts');
 const path = require('path');
 const fs = require('fs');
@@ -11,7 +12,7 @@ const { updateMp4Metadata } = require('./feature/update-metadata/updateMp4Metada
 const { updatePngMetadata } = require('./feature/update-metadata/updatePngMetadata');
 const { updateWavMetadata } = require('./feature/update-metadata/updateWavMetadata');
 const { updateWebpMetadata } = require('./feature/update-metadata/updateWebpMetadata');
-// Convert File Type Imports (unchanged imports omitted for brevity)
+// Convert File Type Imports
 const { convertGifToMp4 } = require('./feature/convert-file-type/convert-videos/convertGifToMp4');
 const { convertGifToWebm } = require('./feature/convert-file-type/convert-videos/convertGifToWebm');
 const { convertMp4ToGif } = require('./feature/convert-file-type/convert-videos/convertMp4ToGif');
@@ -32,6 +33,10 @@ const { renameFiles } = require('./feature/rename-files/renameFiles');
 // Sort Files Imports
 const { sortFilesByExtension } = require('./feature/sort-files/sortFilesByExtension');
 const { sortFilesByType } = require('./feature/sort-files/sortFilesByType');
+// Generate Images Imports
+const { generateDalleImage } = require('./feature/generate-images/generateDalleImage');
+const { generateIdeogramImage } = require('./feature/generate-images/generateIdeogramImage');
+const { generateGrokImage } = require('./feature/generate-images/generateGrokImage');
 
 // Configuration
 const BASE_DIR = path.join(__dirname, '..');
@@ -42,7 +47,7 @@ const LOG_DIR = path.join(BASE_DIR, 'logs');
 // Help message
 function displayHelp() {
   const helpText = `
-main.js - Metadata Update, File Conversion, Resize, Rename & Sort Console Application
+main.js - Metadata Update, File Conversion, Resize, Rename, Sort & Image Generation Console Application
 
 Usage:
   node src/main.js [--help] [--verbose]
@@ -62,6 +67,10 @@ Features:
   - Sort Files:
     - Sort Files By Extension
     - Sort Files By Type (Video & Images)
+  - Generate Images:
+    - Generate Dalle Image
+    - Generate Ideogram Image
+    - Generate Midjourney Image
 
 Directories:
   - Bin: ${BIN_DIR}
@@ -117,6 +126,7 @@ async function main() {
         { title: 'Resize Files', value: 'resizeFiles' },
         { title: 'Rename Files', value: 'renameFiles' },
         { title: 'Sort Files', value: 'sortFiles' },
+        { title: 'Generate Images', value: 'generateImages' },
         { title: 'Exit', value: 'exit' },
       ],
       initial: 0,
@@ -152,6 +162,10 @@ async function main() {
       case 'sortFiles':
         log('DEBUG', 'Entering sort menu');
         await sortMenu();
+        break;
+      case 'generateImages':
+        log('DEBUG', 'Entering generate images menu');
+        await generateImagesMenu();
         break;
       default:
         log('WARN', `Unknown choice selected: ${initialResponse.choice}`);
@@ -471,6 +485,55 @@ async function main() {
 
     log('DEBUG', 'Returning to sort menu');
     await sortMenu();
+  }
+
+  async function generateImagesMenu() {
+    log('DEBUG', 'Prompting for image generation selection');
+    const generateResponse = await prompts({
+      type: 'select',
+      name: 'generateType',
+      message: 'Choose an image generation type:',
+      choices: [
+        { title: 'Generate Dalle Image', value: 'dalle' },
+        { title: 'Generate Ideogram Image', value: 'ideogram' },
+        { title: 'Generate Grok Image', value: 'grok' },
+        { title: 'Back', value: 'back' },
+      ],
+      initial: 0,
+    });
+
+    log('DEBUG', `User selected generate type: ${generateResponse.generateType}`);
+    if (!generateResponse.generateType || generateResponse.generateType === 'back') {
+      log('INFO', 'Returning to main menu.');
+      return;
+    }
+
+    let result;
+    switch (generateResponse.generateType) {
+      case 'dalle':
+        log('DEBUG', 'Starting Dalle image generation');
+        result = await generateDalleImage();
+        break;
+      case 'ideogram':
+        log('DEBUG', 'Starting Ideogram image generation');
+        result = await generateIdeogramImage();
+        break;
+      case 'grok':
+        log('DEBUG', 'Starting Grok image generation');
+        result = await generateGrokImage();
+        break;
+      default:
+        log('WARN', `Invalid generate type selected: ${generateResponse.generateType}`);
+        result = 'error';
+    }
+
+    log('DEBUG', `Image generation result: ${result}`);
+    if (result === 'cancelled') log('INFO', 'Image generation cancelled by user.');
+    else if (result === 'success') log('INFO', 'Image generation completed successfully.');
+    else log('INFO', 'Image generation failed.');
+
+    log('DEBUG', 'Returning to generate images menu');
+    await generateImagesMenu();
   }
 
   log('DEBUG', 'Launching main menu');

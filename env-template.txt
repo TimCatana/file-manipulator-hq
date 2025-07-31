@@ -1,0 +1,5 @@
+API keys for image generation services (replace with actual keys)
+
+OPENAI_API_KEY=
+IDEOGRAM_API_KEY=
+XAI_API_KEY=
