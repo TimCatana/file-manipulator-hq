@@ -47,7 +47,7 @@ const LOG_DIR = path.join(BASE_DIR, 'logs');
 // Help message
 function displayHelp() {
   const helpText = `
-main.js - Metadata Update, File Conversion, Resize, Rename, Sort & Image Generation Console Application
+main.js - Metadata Update, File Conversion, Resize, Rename, Sort & Media Generation Console Application
 
 Usage:
   node src/main.js [--help] [--verbose]
@@ -70,7 +70,8 @@ Features:
   - Generate Images:
     - Generate Dalle Image
     - Generate Ideogram Image
-    - Generate Midjourney Image
+    - Generate Grok Image
+  - Generate Videos:
 
 Directories:
   - Bin: ${BIN_DIR}
@@ -107,7 +108,7 @@ async function main() {
     return;
   }
   if (args.includes('-v') || args.includes('--version')) {
-    log('INFO', 'Metadata Update, File Conversion, Resize, Rename & Sort Console App v1.0.0');
+    log('INFO', 'Metadata Update, File Conversion, Resize, Rename, Sort & Media Generation Console App v1.0.0');
     return;
   }
 
@@ -127,6 +128,7 @@ async function main() {
         { title: 'Rename Files', value: 'renameFiles' },
         { title: 'Sort Files', value: 'sortFiles' },
         { title: 'Generate Images', value: 'generateImages' },
+        { title: 'Generate Videos', value: 'generateVideos' },
         { title: 'Exit', value: 'exit' },
       ],
       initial: 0,
@@ -166,6 +168,10 @@ async function main() {
       case 'generateImages':
         log('DEBUG', 'Entering generate images menu');
         await generateImagesMenu();
+        break;
+      case 'generateVideos':
+        log('DEBUG', 'Entering generate videos menu');
+        await generateVideosMenu();
         break;
       default:
         log('WARN', `Unknown choice selected: ${initialResponse.choice}`);
@@ -534,6 +540,40 @@ async function main() {
 
     log('DEBUG', 'Returning to generate images menu');
     await generateImagesMenu();
+  }
+
+  async function generateVideosMenu() {
+    log('DEBUG', 'Prompting for video generation selection');
+    const generateResponse = await prompts({
+      type: 'select',
+      name: 'generateType',
+      message: 'Choose a video generation type:',
+      choices: [
+        { title: 'Back', value: 'back' },
+      ],
+      initial: 0,
+    });
+
+    log('DEBUG', `User selected generate type: ${generateResponse.generateType}`);
+    if (!generateResponse.generateType || generateResponse.generateType === 'back') {
+      log('INFO', 'Returning to main menu.');
+      return;
+    }
+
+    let result;
+    switch (generateResponse.generateType) {
+      default:
+        log('WARN', `Invalid generate type selected: ${generateResponse.generateType}`);
+        result = 'error';
+    }
+
+    log('DEBUG', `Video generation result: ${result}`);
+    if (result === 'cancelled') log('INFO', 'Video generation cancelled by user.');
+    else if (result === 'success') log('INFO', 'Video generation completed successfully.');
+    else log('INFO', 'Video generation failed.');
+
+    log('DEBUG', 'Returning to generate videos menu');
+    await generateVideosMenu();
   }
 
   log('DEBUG', 'Launching main menu');
