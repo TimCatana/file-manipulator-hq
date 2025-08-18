@@ -7,15 +7,16 @@ const sharp = require('sharp');
 const crypto = require('crypto');
 const pixelmatchModule = require('pixelmatch');
 const pixelmatch = pixelmatchModule.default;
-const { execSync } = require('child_process');
+const ffmpeg = require('fluent-ffmpeg');
 const { log } = require('../../backend/utils/logUtils');
 
 // Configuration
 const BASE_DIR = path.join(__dirname, '..');
-const OUTPUT_DIR = path.join(BASE_DIR, 'bin', 'cleanup-files', 'duplicate-videos');
+const OUTPUT_DIR = path.join(__dirname, '..', '..', '..', 'bin', 'cleanup-files', 'duplicate-videos');
 
 log('DEBUG', `Pixelmatch module loaded: ${typeof pixelmatch}`);
 log('DEBUG', `Sharp module loaded: ${typeof sharp}`);
+log('DEBUG', `Fluent-ffmpeg module loaded: ${typeof ffmpeg}`);
 
 function getTimestamp() {
   const now = new Date();
@@ -31,52 +32,74 @@ function getTimestamp() {
 function checkFFmpeg() {
   log('DEBUG', 'Checking for FFmpeg and ffprobe installation');
   try {
-    const ffmpegVersion = execSync('ffmpeg -version', { encoding: 'utf8' });
-    const ffprobeVersion = execSync('ffprobe -version', { encoding: 'utf8' });
-    log('INFO', `FFmpeg detected: ${ffmpegVersion.split('\n')[0]}`);
-    log('INFO', `ffprobe detected: ${ffprobeVersion.split('\n')[0]}`);
-    log('DEBUG', 'FFmpeg and ffprobe check successful');
-    return true;
+    return new Promise((resolve) => {
+      ffmpeg.getAvailableFormats((err) => {
+        if (err) {
+          log('ERROR', 'FFmpeg or ffprobe is not installed or not in PATH.');
+          log('DEBUG', `FFmpeg/ffprobe check failed: ${err.message}`);
+          resolve(false);
+        } else {
+          log('INFO', 'FFmpeg and ffprobe detected');
+          log('DEBUG', 'FFmpeg and ffprobe check successful');
+          resolve(true);
+        }
+      });
+    });
   } catch (error) {
     log('ERROR', 'FFmpeg or ffprobe is not installed or not in PATH.');
     log('DEBUG', `FFmpeg/ffprobe check failed: ${error.message}`);
-    return false;
+    return Promise.resolve(false);
   }
 }
 
-async function getVideoDuration(videoPath) {
+async function getVideoDuration(videoPath, inputDir) {
   try {
-    log('DEBUG', `Retrieving duration for ${videoPath}`);
-    const output = execSync(`ffprobe -v error -show_entries format=duration -of json "${videoPath}"`, { encoding: 'utf8' });
-    const data = JSON.parse(output);
-    const duration = parseFloat(data.format.duration);
-    log('DEBUG', `Duration of ${videoPath}: ${duration} seconds`);
-    return duration;
+    log('DEBUG', `Retrieving duration for ${path.relative(inputDir, videoPath)}`, { basePath: inputDir });
+    return new Promise((resolve, reject) => {
+      ffmpeg.ffprobe(videoPath, (err, metadata) => {
+        if (err) {
+          log('ERROR', `Failed to get duration for ${path.relative(inputDir, videoPath)}: ${err.message}`, { basePath: inputDir });
+          return reject(err);
+        }
+        const duration = parseFloat(metadata.format.duration);
+        log('DEBUG', `Duration of ${path.relative(inputDir, videoPath)}: ${duration} seconds`, { basePath: inputDir });
+        resolve(duration);
+      });
+    });
   } catch (error) {
-    log('ERROR', `Failed to get duration for ${videoPath}: ${error.message}`);
+    log('ERROR', `Failed to get duration for ${path.relative(inputDir, videoPath)}: ${error.message}`, { basePath: inputDir });
     log('DEBUG', `Duration retrieval error stack: ${error.stack}`);
     return null;
   }
 }
 
-async function extractKeyframes(videoPath, tempDir) {
-  const duration = await getVideoDuration(videoPath);
+async function extractKeyframes(videoPath, tempDir, inputDir) {
+  const duration = await getVideoDuration(videoPath, inputDir);
   if (!duration) return null;
 
   const keyframes = [];
-  const positions = duration > 3 ? [0.1, 0.5, 0.9] : [0.5]; // Use 10%, 50%, 90% for videos > 3s, else single frame
-  log('DEBUG', `Extracting keyframes for ${videoPath} at positions: ${positions.join(', ')}`);
+  const positions = duration > 3 ? [0.1, 0.5, 0.9] : [0.5];
+  log('DEBUG', `Extracting keyframes for ${path.relative(inputDir, videoPath)} at positions: ${positions.join(', ')}`, { basePath: inputDir });
 
   for (const pos of positions) {
     const time = duration * pos;
     const tempFile = path.join(tempDir, `keyframe-${crypto.randomBytes(8).toString('hex')}.png`);
     try {
-      execSync(`ffmpeg -i "${videoPath}" -ss ${time} -vframes 1 "${tempFile}" -y`, { stdio: 'ignore' });
+      await new Promise((resolve, reject) => {
+        ffmpeg(videoPath)
+          .seekInput(time)
+          .frames(1)
+          .output(tempFile)
+          .outputOptions('-y')
+          .on('end', resolve)
+          .on('error', reject)
+          .run();
+      });
       const buffer = await fs.readFile(tempFile);
       keyframes.push(buffer);
-      await fs.unlink(tempFile).catch(err => log('DEBUG', `Failed to delete temp file ${tempFile}: ${err.message}`));
+      await fs.unlink(tempFile).catch(err => log('DEBUG', `Failed to delete temp file ${path.relative(tempDir, tempFile)}: ${err.message}`, { basePath: tempDir }));
     } catch (error) {
-      log('ERROR', `Failed to extract keyframe at ${time}s from ${videoPath}: ${error.message}`);
+      log('ERROR', `Failed to extract keyframe at ${time}s from ${path.relative(inputDir, videoPath)}: ${error.message}`, { basePath: inputDir });
       log('DEBUG', `Keyframe extraction error stack: ${error.stack}`);
       return null;
     }
@@ -84,13 +107,12 @@ async function extractKeyframes(videoPath, tempDir) {
   return keyframes;
 }
 
-async function areVideosIdentical(video1Path, video2Path, tempDir) {
+async function areVideosIdentical(video1Path, video2Path, tempDir, inputDir) {
   try {
-    log('DEBUG', `Comparing videos: ${video1Path} vs ${video2Path}`);
+    log('DEBUG', `Comparing videos: ${path.relative(inputDir, video1Path)} vs ${path.relative(inputDir, video2Path)}`, { basePath: inputDir });
 
-    // Check durations first
-    const duration1 = await getVideoDuration(video1Path);
-    const duration2 = await getVideoDuration(video2Path);
+    const duration1 = await getVideoDuration(video1Path, inputDir);
+    const duration2 = await getVideoDuration(video2Path, inputDir);
     if (duration1 === null || duration2 === null) {
       log('DEBUG', `Duration retrieval failed for one or both videos`);
       return false;
@@ -101,9 +123,8 @@ async function areVideosIdentical(video1Path, video2Path, tempDir) {
     }
     log('DEBUG', `Durations match: ${duration1}s`);
 
-    // Extract and compare keyframes
-    const keyframes1 = await extractKeyframes(video1Path, tempDir);
-    const keyframes2 = await extractKeyframes(video2Path, tempDir);
+    const keyframes1 = await extractKeyframes(video1Path, tempDir, inputDir);
+    const keyframes2 = await extractKeyframes(video2Path, tempDir, inputDir);
 
     if (!keyframes1 || !keyframes2 || keyframes1.length !== keyframes2.length) {
       log('DEBUG', `Keyframe extraction failed or mismatched keyframe count`);
@@ -185,11 +206,17 @@ function parseArgs(args) {
   return params;
 }
 
+function isValidFilePath(filePath) {
+  const validPathRegex = /^[a-zA-Z0-9._-][a-zA-Z0-9._-]*(?:\.[a-zA-Z0-9]+)?$/;
+  return validPathRegex.test(path.basename(filePath));
+}
+
 async function findDuplicateVideos(args = process.argv.slice(2)) {
   try {
     log('INFO', 'Starting Find Duplicate Videos Feature');
 
-    if (!checkFFmpeg()) {
+    const ffmpegAvailable = await checkFFmpeg();
+    if (!ffmpegAvailable) {
       log('ERROR', 'Required tools FFmpeg or ffprobe not installed.');
       return 'error';
     }
@@ -199,12 +226,17 @@ async function findDuplicateVideos(args = process.argv.slice(2)) {
 
     let inputDir;
     if (params['input']) {
-      inputDir = params['input'];
+      inputDir = path.resolve(params['input']);
       try {
         await fs.access(inputDir);
-        log('DEBUG', `Input directory from args: ${inputDir}`);
+        log('DEBUG', `Input directory from args: ${inputDir}`, { basePath: inputDir });
+        const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+        if (forbiddenDirs.some(dir => inputDir.startsWith(path.resolve(dir)))) {
+          log('ERROR', `Input directory ${inputDir} is a system directory and cannot be processed.`, { sanitizePaths: false });
+          return 'error';
+        }
       } catch {
-        log('ERROR', `Input directory not found: ${inputDir}`);
+        log('ERROR', `Input directory not found: ${inputDir}`, { basePath: inputDir });
         return 'error';
       }
     } else {
@@ -217,14 +249,19 @@ async function findDuplicateVideos(args = process.argv.slice(2)) {
           if (value.trim() === '') return true;
           try {
             await fs.access(value);
+            const resolvedDir = path.resolve(value);
+            const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+            if (forbiddenDirs.some(dir => resolvedDir.startsWith(path.resolve(dir)))) {
+              return 'System directory not allowed.';
+            }
             return true;
           } catch {
             return 'Directory not found.';
           }
         }
       });
-      inputDir = inputDirResponse.dir;
-      log('DEBUG', `Input directory provided: ${inputDir}`);
+      inputDir = inputDirResponse.dir ? path.resolve(inputDirResponse.dir) : null;
+      log('DEBUG', `Input directory provided: ${inputDir}`, { basePath: inputDir });
       if (!inputDir) {
         log('INFO', 'No input directory provided, cancelling...');
         return 'cancelled';
@@ -260,28 +297,42 @@ async function findDuplicateVideos(args = process.argv.slice(2)) {
       }
     }
 
-    // Create temporary directory for keyframes
-    const tempDir = path.join(BASE_DIR, 'bin', 'temp');
-    log('DEBUG', `Creating temporary directory: ${tempDir}`);
+    if (deleteOption === 'all') {
+      const confirmResponse = await prompts({
+        type: 'confirm',
+        name: 'confirm',
+        message: 'WARNING: --delete all will delete all but the first file in each duplicate group without further prompts. Continue?',
+        initial: false
+      });
+      if (!confirmResponse.confirm) {
+        log('INFO', 'Deletion cancelled by user.');
+        return 'cancelled';
+      }
+    }
+
+    const tempDir = path.join(BASE_DIR, 'bin', `temp-${crypto.randomBytes(8).toString('hex')}`);
+    log('DEBUG', `Creating temporary directory: ${path.relative(BASE_DIR, tempDir)}`, { basePath: BASE_DIR });
+    if (!path.resolve(tempDir).startsWith(path.resolve(BASE_DIR))) {
+      log('ERROR', `Temporary directory ${tempDir} is outside project root.`, { sanitizePaths: false });
+      return 'error';
+    }
     await fs.mkdir(tempDir, { recursive: true });
 
-    // Read directory and filter video files
-    log('DEBUG', `Reading directory: ${inputDir}`);
+    log('DEBUG', `Reading directory: ${path.relative(inputDir, inputDir)}`, { basePath: inputDir });
     const dirEntries = await fs.readdir(inputDir);
     const videoExtensions = ['.mp4', '.webm'];
     const files = [];
     for (const entry of dirEntries) {
       const fullPath = path.join(inputDir, entry);
       const stats = await fs.stat(fullPath);
-      if (stats.isFile() && videoExtensions.includes(path.extname(fullPath).toLowerCase())) {
+      if (stats.isFile() && videoExtensions.includes(path.extname(fullPath).toLowerCase()) && isValidFilePath(fullPath)) {
         files.push(fullPath);
       }
     }
-    log('DEBUG', `Found ${files.length} video files in ${inputDir}: ${files.join(', ')}`);
+    log('DEBUG', `Found ${files.length} video files in ${path.relative(inputDir, inputDir)}: ${files.map(f => path.relative(inputDir, f)).join(', ')}`, { basePath: inputDir });
 
     if (files.length === 0) {
-      log('INFO', `No video files found in ${inputDir}`);
-      // Write empty report
+      log('INFO', `No video files found in ${path.relative(inputDir, inputDir)}`, { basePath: inputDir });
       const timestamp = getTimestamp();
       const reportPath = path.join(OUTPUT_DIR, `duplicate-videos-report-${timestamp}.json`);
       const report = {
@@ -289,13 +340,12 @@ async function findDuplicateVideos(args = process.argv.slice(2)) {
         deletedFiles: [],
         timestamp: new Date().toISOString()
       };
-      log('DEBUG', `Creating output directory: ${OUTPUT_DIR}`);
+      log('DEBUG', `Creating output directory: ${path.relative(BASE_DIR, OUTPUT_DIR)}`, { basePath: BASE_DIR });
       await fs.mkdir(OUTPUT_DIR, { recursive: true });
-      log('DEBUG', `Writing report to ${reportPath}`);
+      log('DEBUG', `Writing report to ${path.relative(BASE_DIR, reportPath)}`, { basePath: BASE_DIR });
       await fs.writeFile(reportPath, JSON.stringify(report, null, 2));
-      log('INFO', `Duplicate videos report saved to: ${reportPath}`);
-      // Clean up temp directory
-      await fs.rm(tempDir, { recursive: true, force: true }).catch(err => log('DEBUG', `Failed to delete temp dir ${tempDir}: ${err.message}`));
+      log('INFO', `Duplicate videos report saved to: ${path.relative(BASE_DIR, reportPath)}`, { basePath: BASE_DIR });
+      await fs.rm(tempDir, { recursive: true, force: true }).catch(err => log('DEBUG', `Failed to delete temp dir ${path.relative(BASE_DIR, tempDir)}: ${err.message}`, { basePath: BASE_DIR }));
       return 'success';
     }
 
@@ -304,14 +354,13 @@ async function findDuplicateVideos(args = process.argv.slice(2)) {
     const duplicateGroups = [];
     const deletedFiles = [];
 
-    // Group duplicates
     for (let i = 0; i < files.length; i++) {
       if (processedFiles.has(files[i])) continue;
       const currentGroup = [files[i]];
       for (let j = i + 1; j < files.length; j++) {
         if (processedFiles.has(files[j])) continue;
-        log('DEBUG', `Comparing ${files[i]} with ${files[j]}`);
-        if (await areVideosIdentical(files[i], files[j], tempDir)) {
+        log('DEBUG', `Comparing ${path.relative(inputDir, files[i])} with ${path.relative(inputDir, files[j])}`, { basePath: inputDir });
+        if (await areVideosIdentical(files[i], files[j], tempDir, inputDir)) {
           currentGroup.push(files[j]);
           processedFiles.add(files[j]);
         }
@@ -319,13 +368,12 @@ async function findDuplicateVideos(args = process.argv.slice(2)) {
       processedFiles.add(files[i]);
       if (currentGroup.length > 1) {
         duplicateGroups.push(currentGroup);
-        log('INFO', `Found duplicate group: ${currentGroup.join(', ')}`);
+        log('INFO', `Found duplicate group: ${currentGroup.map(f => path.relative(inputDir, f)).join(', ')}`, { basePath: inputDir });
       }
     }
 
     if (duplicateGroups.length === 0) {
       log('INFO', 'No duplicate videos found.');
-      // Write empty report
       const timestamp = getTimestamp();
       const reportPath = path.join(OUTPUT_DIR, `duplicate-videos-report-${timestamp}.json`);
       const report = {
@@ -333,13 +381,12 @@ async function findDuplicateVideos(args = process.argv.slice(2)) {
         deletedFiles: [],
         timestamp: new Date().toISOString()
       };
-      log('DEBUG', `Creating output directory: ${OUTPUT_DIR}`);
+      log('DEBUG', `Creating output directory: ${path.relative(BASE_DIR, OUTPUT_DIR)}`, { basePath: BASE_DIR });
       await fs.mkdir(OUTPUT_DIR, { recursive: true });
-      log('DEBUG', `Writing report to ${reportPath}`);
+      log('DEBUG', `Writing report to ${path.relative(BASE_DIR, reportPath)}`, { basePath: BASE_DIR });
       await fs.writeFile(reportPath, JSON.stringify(report, null, 2));
-      log('INFO', `Duplicate videos report saved to: ${reportPath}`);
-      // Clean up temp directory
-      await fs.rm(tempDir, { recursive: true, force: true }).catch(err => log('DEBUG', `Failed to delete temp dir ${tempDir}: ${err.message}`));
+      log('INFO', `Duplicate videos report saved to: ${path.relative(BASE_DIR, reportPath)}`, { basePath: BASE_DIR });
+      await fs.rm(tempDir, { recursive: true, force: true }).catch(err => log('DEBUG', `Failed to delete temp dir ${path.relative(BASE_DIR, tempDir)}: ${err.message}`, { basePath: BASE_DIR }));
       return 'success';
     }
 
@@ -347,17 +394,17 @@ async function findDuplicateVideos(args = process.argv.slice(2)) {
       log('INFO', `Found ${duplicateGroups.length} duplicate video groups. No files deleted as per user selection.`);
     } else {
       for (const group of duplicateGroups) {
-        let keepFile = group[0]; // Default to keeping the first file
+        let keepFile = group[0];
         let filesToDelete = [];
 
         if (deleteOption === 'yes') {
-          log('DEBUG', `Prompting for deletion of duplicate group: ${group.join(', ')}`);
+          log('DEBUG', `Prompting for deletion of duplicate group: ${group.map(f => path.relative(inputDir, f)).join(', ')}`, { basePath: inputDir });
           const deleteResponse = await prompts({
             type: 'select',
             name: 'keep',
-            message: `Duplicate videos found: ${group.join(', ')}. Choose one to keep:`,
+            message: `Duplicate videos found: ${group.map(f => path.relative(inputDir, f)).join(', ')}. Choose one to keep:`,
             choices: [
-              ...group.map(file => ({ title: `Keep ${file}`, value: file })),
+              ...group.map(file => ({ title: `Keep ${path.relative(inputDir, file)}`, value: file })),
               { title: 'Keep all', value: 'keep' },
             ],
             initial: 0,
@@ -366,21 +413,21 @@ async function findDuplicateVideos(args = process.argv.slice(2)) {
             keepFile = deleteResponse.keep;
             filesToDelete = group.filter(file => file !== keepFile);
           }
-          log('DEBUG', `User chose to keep ${keepFile ? keepFile : 'all'} for group ${group.join(', ')}`);
+          log('DEBUG', `User chose to keep ${keepFile ? path.relative(inputDir, keepFile) : 'all'} for group ${group.map(f => path.relative(inputDir, f)).join(', ')}`, { basePath: inputDir });
         } else if (deleteOption === 'all') {
-          filesToDelete = group.slice(1); // Keep first file, delete the rest
-          log('DEBUG', `Auto-keeping ${keepFile} and deleting ${filesToDelete.join(', ')} for group ${group.join(', ')}`);
+          filesToDelete = group.slice(1);
+          log('DEBUG', `Auto-keeping ${path.relative(inputDir, keepFile)} and deleting ${filesToDelete.map(f => path.relative(inputDir, f)).join(', ')} for group ${group.map(f => path.relative(inputDir, f)).join(', ')}`, { basePath: inputDir });
         }
 
         for (const file of filesToDelete) {
           try {
             const stats = await fs.stat(file);
-            log('DEBUG', `Deleting file ${file}, size: ${stats.size} bytes`);
+            log('DEBUG', `Deleting file ${path.relative(inputDir, file)}, size: ${stats.size} bytes`, { basePath: inputDir });
             await fs.unlink(file);
-            log('INFO', `Deleted duplicate video: ${file}`);
+            log('INFO', `Deleted duplicate video: ${path.relative(inputDir, file)}`, { basePath: inputDir });
             deletedFiles.push(file);
           } catch (error) {
-            log('ERROR', `Failed to delete ${file}: ${error.message}`);
+            log('ERROR', `Failed to delete ${path.relative(inputDir, file)}: ${error.message}`, { basePath: inputDir });
             log('DEBUG', `Delete error stack: ${error.stack}`);
           }
         }
@@ -388,30 +435,27 @@ async function findDuplicateVideos(args = process.argv.slice(2)) {
       log('INFO', `Found ${duplicateGroups.length} duplicate video groups, deleted ${deletedFiles.length} files.`);
     }
 
-    // Write report
     const timestamp = getTimestamp();
     const reportPath = path.join(OUTPUT_DIR, `duplicate-videos-report-${timestamp}.json`);
     const report = {
-      duplicateGroups: duplicateGroups,
-      deletedFiles: deletedFiles,
+      duplicateGroups: duplicateGroups.map(group => group.map(file => path.relative(inputDir, file))),
+      deletedFiles: deletedFiles.map(file => path.relative(inputDir, file)),
       timestamp: new Date().toISOString()
     };
-    log('DEBUG', `Creating output directory: ${OUTPUT_DIR}`);
+    log('DEBUG', `Creating output directory: ${path.relative(BASE_DIR, OUTPUT_DIR)}`, { basePath: BASE_DIR });
     await fs.mkdir(OUTPUT_DIR, { recursive: true });
-    log('DEBUG', `Writing report to ${reportPath}`);
+    log('DEBUG', `Writing report to ${path.relative(BASE_DIR, reportPath)}`, { basePath: BASE_DIR });
     await fs.writeFile(reportPath, JSON.stringify(report, null, 2));
-    log('INFO', `Duplicate videos report saved to: ${reportPath}`);
+    log('INFO', `Duplicate videos report saved to: ${path.relative(BASE_DIR, reportPath)}`, { basePath: BASE_DIR });
 
-    // Clean up temp directory
-    await fs.rm(tempDir, { recursive: true, force: true }).catch(err => log('DEBUG', `Failed to delete temp dir ${tempDir}: ${err.message}`));
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(err => log('DEBUG', `Failed to delete temp dir ${path.relative(BASE_DIR, tempDir)}: ${err.message}`, { basePath: BASE_DIR }));
 
     log('DEBUG', `Find Duplicate Videos completed: ${duplicateGroups.length} duplicate groups found, ${deletedFiles.length} deleted`);
     return deletedFiles.length > 0 || duplicateGroups.length > 0 ? 'success' : 'error';
   } catch (error) {
     log('ERROR', `Unexpected error in Find Duplicate Videos: ${error.message}`);
     log('DEBUG', `Error stack: ${error.stack}`);
-    // Clean up temp directory on error
-    await fs.rm(tempDir, { recursive: true, force: true }).catch(err => log('DEBUG', `Failed to delete temp dir ${tempDir}: ${err.message}`));
+    await fs.rm(tempDir, { recursive: true, force: true }).catch(err => log('DEBUG', `Failed to delete temp dir ${path.relative(BASE_DIR, tempDir)}: ${err.message}`, { basePath: BASE_DIR }));
     return 'error';
   }
 }

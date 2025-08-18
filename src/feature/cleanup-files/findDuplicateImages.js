@@ -11,7 +11,7 @@ const { log } = require('../../backend/utils/logUtils');
 
 // Configuration
 const BASE_DIR = path.join(__dirname, '..');
-const OUTPUT_DIR = path.join(BASE_DIR, 'bin', 'cleanup-files', 'duplicate-images');
+const OUTPUT_DIR = path.join(__dirname, '..', '..', '..', 'bin', 'cleanup-files', 'duplicate-images');
 
 log('DEBUG', `Pixelmatch module loaded: ${typeof pixelmatch}`);
 log('DEBUG', `Sharp module loaded: ${typeof sharp}`);
@@ -39,11 +39,16 @@ function parseArgs(args) {
         i++;
       } else {
         log('DEBUG', `Ignoring unrecognized argument: --${flag}`);
-        if (args[i + 1] && !args[i + 1].startsWith('--')) i++; // Skip value of unrecognized flag
+        if (args[i + 1] && !args[i + 1].startsWith('--')) i++;
       }
     }
   }
   return params;
+}
+
+function isValidFilePath(filePath) {
+  const validPathRegex = /^[a-zA-Z0-9._-][a-zA-Z0-9._-]*(?:\.[a-zA-Z0-9]+)?$/;
+  return validPathRegex.test(path.basename(filePath));
 }
 
 async function areImagesIdentical(buffer1, buffer2) {
@@ -84,7 +89,7 @@ async function areImagesIdentical(buffer1, buffer2) {
     log('DEBUG', `Performing pixelmatch comparison`);
     if (typeof pixelmatch !== 'function') {
       log('ERROR', `Pixelmatch is not a function, falling back to hash comparison`);
-      return false; // Fallback to hash comparison result
+      return false;
     }
     const diffPixels = pixelmatch(data1, data2, null, info1.width, info1.height, { threshold: 0.1 });
     log('DEBUG', `Pixel differences: ${diffPixels}`);
@@ -105,12 +110,17 @@ async function findDuplicateImages(args = process.argv.slice(2)) {
 
     let inputDir;
     if (params['input']) {
-      inputDir = params['input'];
+      inputDir = path.resolve(params['input']);
       try {
         await fs.access(inputDir);
-        log('DEBUG', `Input directory from args: ${inputDir}`);
+        log('DEBUG', `Input directory from args: ${inputDir}`, { basePath: inputDir });
+        const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+        if (forbiddenDirs.some(dir => inputDir.startsWith(path.resolve(dir)))) {
+          log('ERROR', `Input directory ${inputDir} is a system directory and cannot be processed.`, { sanitizePaths: false });
+          return 'error';
+        }
       } catch {
-        log('ERROR', `Input directory not found: ${inputDir}`);
+        log('ERROR', `Input directory not found: ${inputDir}`, { basePath: inputDir });
         return 'error';
       }
     } else {
@@ -123,14 +133,19 @@ async function findDuplicateImages(args = process.argv.slice(2)) {
           if (value.trim() === '') return true;
           try {
             await fs.access(value);
+            const resolvedDir = path.resolve(value);
+            const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+            if (forbiddenDirs.some(dir => resolvedDir.startsWith(path.resolve(dir)))) {
+              return 'System directory not allowed.';
+            }
             return true;
           } catch {
             return 'Directory not found.';
           }
         }
       });
-      inputDir = inputDirResponse.dir;
-      log('DEBUG', `Input directory provided: ${inputDir}`);
+      inputDir = inputDirResponse.dir ? path.resolve(inputDirResponse.dir) : null;
+      log('DEBUG', `Input directory provided: ${inputDir}`, { basePath: inputDir });
       if (!inputDir) {
         log('INFO', 'No input directory provided, cancelling...');
         return 'cancelled';
@@ -166,23 +181,34 @@ async function findDuplicateImages(args = process.argv.slice(2)) {
       }
     }
 
-    // Read directory and filter image files
-    log('DEBUG', `Reading directory: ${inputDir}`);
+    if (deleteOption === 'all') {
+      const confirmResponse = await prompts({
+        type: 'confirm',
+        name: 'confirm',
+        message: 'WARNING: --delete all will delete all but the first file in each duplicate group without further prompts. Continue?',
+        initial: false
+      });
+      if (!confirmResponse.confirm) {
+        log('INFO', 'Deletion cancelled by user.');
+        return 'cancelled';
+      }
+    }
+
+    log('DEBUG', `Reading directory: ${path.relative(inputDir, inputDir)}`, { basePath: inputDir });
     const dirEntries = await fs.readdir(inputDir);
     const imageExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
     const files = [];
     for (const entry of dirEntries) {
       const fullPath = path.join(inputDir, entry);
       const stats = await fs.stat(fullPath);
-      if (stats.isFile() && imageExtensions.includes(path.extname(fullPath).toLowerCase())) {
+      if (stats.isFile() && imageExtensions.includes(path.extname(fullPath).toLowerCase()) && isValidFilePath(fullPath)) {
         files.push(fullPath);
       }
     }
-    log('DEBUG', `Found ${files.length} image files in ${inputDir}: ${files.join(', ')}`);
+    log('DEBUG', `Found ${files.length} image files in ${path.relative(inputDir, inputDir)}: ${files.map(f => path.relative(inputDir, f)).join(', ')}`, { basePath: inputDir });
 
     if (files.length === 0) {
-      log('INFO', `No image files found in ${inputDir}`);
-      // Write empty report
+      log('INFO', `No image files found in ${path.relative(inputDir, inputDir)}`, { basePath: inputDir });
       const timestamp = getTimestamp();
       const reportPath = path.join(OUTPUT_DIR, `duplicate-images-report-${timestamp}.json`);
       const report = {
@@ -190,11 +216,11 @@ async function findDuplicateImages(args = process.argv.slice(2)) {
         deletedFiles: [],
         timestamp: new Date().toISOString()
       };
-      log('DEBUG', `Creating output directory: ${OUTPUT_DIR}`);
+      log('DEBUG', `Creating output directory: ${path.relative(BASE_DIR, OUTPUT_DIR)}`, { basePath: BASE_DIR });
       await fs.mkdir(OUTPUT_DIR, { recursive: true });
-      log('DEBUG', `Writing report to ${reportPath}`);
+      log('DEBUG', `Writing report to ${path.relative(BASE_DIR, reportPath)}`, { basePath: BASE_DIR });
       await fs.writeFile(reportPath, JSON.stringify(report, null, 2));
-      log('INFO', `Duplicate images report saved to: ${reportPath}`);
+      log('INFO', `Duplicate images report saved to: ${path.relative(BASE_DIR, reportPath)}`, { basePath: BASE_DIR });
       return 'success';
     }
 
@@ -203,7 +229,6 @@ async function findDuplicateImages(args = process.argv.slice(2)) {
     const duplicateGroups = [];
     const deletedFiles = [];
 
-    // Group duplicates
     for (let i = 0; i < files.length; i++) {
       if (processedFiles.has(files[i])) continue;
       const currentGroup = [files[i]];
@@ -211,7 +236,7 @@ async function findDuplicateImages(args = process.argv.slice(2)) {
       for (let j = i + 1; j < files.length; j++) {
         if (processedFiles.has(files[j])) continue;
         const buffer2 = await fs.readFile(files[j]);
-        log('DEBUG', `Comparing ${files[i]} with ${files[j]}`);
+        log('DEBUG', `Comparing ${path.relative(inputDir, files[i])} with ${path.relative(inputDir, files[j])}`, { basePath: inputDir });
         if (await areImagesIdentical(buffer1, buffer2)) {
           currentGroup.push(files[j]);
           processedFiles.add(files[j]);
@@ -220,13 +245,12 @@ async function findDuplicateImages(args = process.argv.slice(2)) {
       processedFiles.add(files[i]);
       if (currentGroup.length > 1) {
         duplicateGroups.push(currentGroup);
-        log('INFO', `Found duplicate group: ${currentGroup.join(', ')}`);
+        log('INFO', `Found duplicate group: ${currentGroup.map(f => path.relative(inputDir, f)).join(', ')}`, { basePath: inputDir });
       }
     }
 
     if (duplicateGroups.length === 0) {
       log('INFO', 'No duplicate images found.');
-      // Write empty report
       const timestamp = getTimestamp();
       const reportPath = path.join(OUTPUT_DIR, `duplicate-images-report-${timestamp}.json`);
       const report = {
@@ -234,11 +258,11 @@ async function findDuplicateImages(args = process.argv.slice(2)) {
         deletedFiles: [],
         timestamp: new Date().toISOString()
       };
-      log('DEBUG', `Creating output directory: ${OUTPUT_DIR}`);
+      log('DEBUG', `Creating output directory: ${path.relative(BASE_DIR, OUTPUT_DIR)}`, { basePath: BASE_DIR });
       await fs.mkdir(OUTPUT_DIR, { recursive: true });
-      log('DEBUG', `Writing report to ${reportPath}`);
+      log('DEBUG', `Writing report to ${path.relative(BASE_DIR, reportPath)}`, { basePath: BASE_DIR });
       await fs.writeFile(reportPath, JSON.stringify(report, null, 2));
-      log('INFO', `Duplicate images report saved to: ${reportPath}`);
+      log('INFO', `Duplicate images report saved to: ${path.relative(BASE_DIR, reportPath)}`, { basePath: BASE_DIR });
       return 'success';
     }
 
@@ -246,17 +270,17 @@ async function findDuplicateImages(args = process.argv.slice(2)) {
       log('INFO', `Found ${duplicateGroups.length} duplicate image groups. No files deleted as per user selection.`);
     } else {
       for (const group of duplicateGroups) {
-        let keepFile = group[0]; // Default to keeping the first file
+        let keepFile = group[0];
         let filesToDelete = [];
 
         if (deleteOption === 'yes') {
-          log('DEBUG', `Prompting for deletion of duplicate group: ${group.join(', ')}`);
+          log('DEBUG', `Prompting for deletion of duplicate group: ${group.map(f => path.relative(inputDir, f)).join(', ')}`, { basePath: inputDir });
           const deleteResponse = await prompts({
             type: 'select',
             name: 'keep',
-            message: `Duplicate images found: ${group.join(', ')}. Choose one to keep:`,
+            message: `Duplicate images found: ${group.map(f => path.relative(inputDir, f)).join(', ')}. Choose one to keep:`,
             choices: [
-              ...group.map(file => ({ title: `Keep ${file}`, value: file })),
+              ...group.map(file => ({ title: `Keep ${path.relative(inputDir, file)}`, value: file })),
               { title: 'Keep all', value: 'keep' },
             ],
             initial: 0,
@@ -265,19 +289,21 @@ async function findDuplicateImages(args = process.argv.slice(2)) {
             keepFile = deleteResponse.keep;
             filesToDelete = group.filter(file => file !== keepFile);
           }
-          log('DEBUG', `User chose to keep ${keepFile ? keepFile : 'all'} for group ${group.join(', ')}`);
+          log('DEBUG', `User chose to keep ${keepFile ? path.relative(inputDir, keepFile) : 'all'} for group ${group.map(f => path.relative(inputDir, f)).join(', ')}`, { basePath: inputDir });
         } else if (deleteOption === 'all') {
-          filesToDelete = group.slice(1); // Keep first file, delete the rest
-          log('DEBUG', `Auto-keeping ${keepFile} and deleting ${filesToDelete.join(', ')} for group ${group.join(', ')}`);
+          filesToDelete = group.slice(1);
+          log('DEBUG', `Auto-keeping ${path.relative(inputDir, keepFile)} and deleting ${filesToDelete.map(f => path.relative(inputDir, f)).join(', ')} for group ${group.map(f => path.relative(inputDir, f)).join(', ')}`, { basePath: inputDir });
         }
 
         for (const file of filesToDelete) {
           try {
+            const stats = await fs.stat(file);
+            log('DEBUG', `Deleting file ${path.relative(inputDir, file)}, size: ${stats.size} bytes`, { basePath: inputDir });
             await fs.unlink(file);
-            log('INFO', `Deleted duplicate image: ${file}`);
+            log('INFO', `Deleted duplicate image: ${path.relative(inputDir, file)}`, { basePath: inputDir });
             deletedFiles.push(file);
           } catch (error) {
-            log('ERROR', `Failed to delete ${file}: ${error.message}`);
+            log('ERROR', `Failed to delete ${path.relative(inputDir, file)}: ${error.message}`, { basePath: inputDir });
             log('DEBUG', `Delete error stack: ${error.stack}`);
           }
         }
@@ -285,19 +311,18 @@ async function findDuplicateImages(args = process.argv.slice(2)) {
       log('INFO', `Found ${duplicateGroups.length} duplicate image groups, deleted ${deletedFiles.length} files.`);
     }
 
-    // Write report
     const timestamp = getTimestamp();
     const reportPath = path.join(OUTPUT_DIR, `duplicate-images-report-${timestamp}.json`);
     const report = {
-      duplicateGroups: duplicateGroups,
-      deletedFiles: deletedFiles,
+      duplicateGroups: duplicateGroups.map(group => group.map(file => path.relative(inputDir, file))),
+      deletedFiles: deletedFiles.map(file => path.relative(inputDir, file)),
       timestamp: new Date().toISOString()
     };
-    log('DEBUG', `Creating output directory: ${OUTPUT_DIR}`);
+    log('DEBUG', `Creating output directory: ${path.relative(BASE_DIR, OUTPUT_DIR)}`, { basePath: BASE_DIR });
     await fs.mkdir(OUTPUT_DIR, { recursive: true });
-    log('DEBUG', `Writing report to ${reportPath}`);
+    log('DEBUG', `Writing report to ${path.relative(BASE_DIR, reportPath)}`, { basePath: BASE_DIR });
     await fs.writeFile(reportPath, JSON.stringify(report, null, 2));
-    log('INFO', `Duplicate images report saved to: ${reportPath}`);
+    log('INFO', `Duplicate images report saved to: ${path.relative(BASE_DIR, reportPath)}`, { basePath: BASE_DIR });
 
     log('DEBUG', `Find Duplicate Images completed: ${duplicateGroups.length} duplicate groups found, ${deletedFiles.length} deleted`);
     return deletedFiles.length > 0 || duplicateGroups.length > 0 ? 'success' : 'error';
