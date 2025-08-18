@@ -65,13 +65,19 @@ async function processMp4File(inputFile, outputFile, metadata) {
       ])
       .save(outputFile)
       .on('start', (cmd) => log('DEBUG', `FFmpeg command: ${cmd}`))
-      .on('end', () => {
+      .on('end', async () => {
         log('INFO', `Success: Metadata updated for ${outputFile}`);
         try {
           const exifCommand = `exiftool -ModifyDate="${currentDateTime}" -DateTimeOriginal="${currentDateTime}" -CreateDate="${currentDateTime}" -FileCreateDate="${currentDateTime}" -FileModifyDate="${currentDateTime}" -overwrite_original "${outputFile}"`;
           log('DEBUG', `Executing ExifTool command: ${exifCommand}`);
           execSync(exifCommand, { stdio: 'ignore' });
           log('INFO', `Success: File timestamps updated for ${outputFile}`);
+          try {
+            const stats = await fsPromises.stat(outputFile);
+            log('DEBUG', `Processed file size: ${stats.size} bytes for ${outputFile}`);
+          } catch (statError) {
+            log('DEBUG', `Failed to retrieve file size for ${outputFile}: ${statError.message}`);
+          }
           resolve();
         } catch (exifError) {
           log('ERROR', `ExifTool error for ${outputFile}: ${exifError.message}`);
@@ -93,13 +99,14 @@ function parseArgs(args) {
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--')) {
       const flag = args[i].slice(2);
-      if (!validFlags.includes(flag)) {
-        log('ERROR', `Invalid argument: --${flag}`);
-        return { error: true, message: `Invalid argument: --${flag}` };
+      if (validFlags.includes(flag)) {
+        const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
+        params[flag] = value;
+        i++;
+      } else {
+        log('DEBUG', `Ignoring unrecognized argument: --${flag}`);
+        if (args[i + 1] && !args[i + 1].startsWith('--')) i++; // Skip value of unrecognized flag
       }
-      const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
-      params[flag] = value;
-      i++;
     }
   }
   return params;
@@ -227,7 +234,7 @@ async function updateMp4Metadata(args = process.argv.slice(2)) {
         return 'error';
       }
       const outputFile = path.join(outputDir, path.basename(inputPath));
-      await processMp4File(inputPath, outputFile, metadata);
+      await processMp4File(inputFile, outputFile, metadata);
     } else if (stats.isDirectory()) {
       log('DEBUG', `Reading directory: ${inputPath}`);
       const files = await fsPromises.readdir(inputPath);

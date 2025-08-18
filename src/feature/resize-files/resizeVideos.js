@@ -46,8 +46,14 @@ async function processVideo(inputPath, outputPath, width, height, method) {
         .outputOptions(['-c:v libx264', '-preset fast', '-c:a copy'])
         .save(outputPath)
         .on('start', (cmd) => log('DEBUG', `FFmpeg command: ${cmd}`))
-        .on('end', () => {
+        .on('end', async () => {
           log('INFO', `${method.charAt(0).toUpperCase() + method.slice(1)}: ${path.basename(inputPath)} -> ${path.basename(outputPath)} (${width}x${height})`);
+          try {
+            const stats = await fsPromises.stat(outputPath);
+            log('DEBUG', `Processed video size: ${stats.size} bytes for ${outputPath}`);
+          } catch (statError) {
+            log('DEBUG', `Failed to retrieve file size for ${outputPath}: ${statError.message}`);
+          }
           log('DEBUG', `Successfully processed ${inputPath} to ${outputPath}`);
           resolve(true);
         })
@@ -70,13 +76,14 @@ function parseArgs(args) {
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--')) {
       const flag = args[i].slice(2);
-      if (!validFlags.includes(flag)) {
-        log('ERROR', `Invalid argument: --${flag}`);
-        return { error: true, message: `Invalid argument: --${flag}` };
+      if (validFlags.includes(flag)) {
+        const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
+        params[flag] = value;
+        i++;
+      } else {
+        log('DEBUG', `Ignoring unrecognized argument: --${flag}`);
+        if (args[i + 1] && !args[i + 1].startsWith('--')) i++; // Skip value of unrecognized flag
       }
-      const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
-      params[flag] = value;
-      i++;
     }
   }
   return params;

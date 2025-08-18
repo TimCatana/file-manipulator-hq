@@ -12,6 +12,7 @@ const { updateMp4Metadata } = require('./feature/update-metadata/updateMp4Metada
 const { updatePngMetadata } = require('./feature/update-metadata/updatePngMetadata');
 const { updateWavMetadata } = require('./feature/update-metadata/updateWavMetadata');
 const { updateWebpMetadata } = require('./feature/update-metadata/updateWebpMetadata');
+const { updateWebmMetadata } = require('./feature/update-metadata/updateWebmMetadata');
 // Convert File Type Imports
 const { convertGifToMp4 } = require('./feature/convert-file-type/convert-videos/convertGifToMp4');
 const { convertGifToWebm } = require('./feature/convert-file-type/convert-videos/convertGifToWebm');
@@ -37,6 +38,9 @@ const { sortFilesByType } = require('./feature/sort-files/sortFilesByType');
 const { generateDalleImage } = require('./feature/generate-images/generateDalleImage');
 const { generateIdeogramImage } = require('./feature/generate-images/generateIdeogramImage');
 const { generateGrokImage } = require('./feature/generate-images/generateGrokImage');
+// Cleanup Files Imports
+const { findDuplicateImages } = require('./feature/cleanup-files/findDuplicateImages');
+const { findDuplicateVideos } = require('./feature/cleanup-files/findDuplicateVideos');
 
 // Configuration
 const BASE_DIR = path.join(__dirname, '..');
@@ -47,7 +51,7 @@ const LOG_DIR = path.join(BASE_DIR, 'logs');
 // Help message
 function displayHelp() {
   const helpText = `
-main.js - Metadata Update, File Conversion, Resize, Rename, Sort & Media Generation Console Application
+main.js - Metadata Update, File Conversion, Resize, Rename, Sort, Cleanup & Media Generation Console Application
 
 Usage:
   node src/main.js [--help] [--verbose]
@@ -58,15 +62,18 @@ Options:
   --verbose     Enable verbose logging
 
 Features:
-  - Update Metadata: GIF, JPG, MP4, PNG, WAV, WebP
   - Convert File Type:
     - Videos: GIF to MP4/WebM, MP4 to GIF/WebM, WebM to GIF/MP4
     - Images: JPG to PNG/WebP, PNG to JPG/WebP, WebP to JPG/PNG
-  - Resize Files: Images, Videos
   - Rename Files
   - Sort Files:
     - Sort Files By Extension
     - Sort Files By Type (Video & Images)
+  - Cleanup Files:
+    - Find Duplicate Images
+    - Find Duplicate Videos
+  - Resize Files: Images, Videos
+  - Update Metadata: GIF, JPG, MP4, PNG, WAV, WebP, WebM
   - Generate Images:
     - Generate Dalle Image
     - Generate Ideogram Image
@@ -108,7 +115,7 @@ async function main() {
     return;
   }
   if (args.includes('-v') || args.includes('--version')) {
-    log('INFO', 'Metadata Update, File Conversion, Resize, Rename, Sort & Media Generation Console App v1.0.0');
+    log('INFO', 'Metadata Update, File Conversion, Resize, Rename, Sort, Cleanup & Media Generation Console App v1.0.0');
     return;
   }
 
@@ -122,11 +129,12 @@ async function main() {
       name: 'choice',
       message: 'Choose an option:',
       choices: [
-        { title: 'Update Metadata', value: 'updateMetadata' },
         { title: 'Convert File Type', value: 'convertFileType' },
-        { title: 'Resize Files', value: 'resizeFiles' },
         { title: 'Rename Files', value: 'renameFiles' },
         { title: 'Sort Files', value: 'sortFiles' },
+        { title: 'Cleanup Files', value: 'cleanupFiles' },
+        { title: 'Resize Files', value: 'resizeFiles' },
+        { title: 'Update Metadata', value: 'updateMetadata' },
         { title: 'Generate Images', value: 'generateImages' },
         { title: 'Generate Videos', value: 'generateVideos' },
         { title: 'Exit', value: 'exit' },
@@ -141,17 +149,9 @@ async function main() {
     }
 
     switch (initialResponse.choice) {
-      case 'updateMetadata':
-        log('DEBUG', 'Entering metadata menu');
-        await metadataMenu();
-        break;
       case 'convertFileType':
         log('DEBUG', 'Entering convert menu');
         await convertMenu();
-        break;
-      case 'resizeFiles':
-        log('DEBUG', 'Entering resize menu');
-        await resizeMenu();
         break;
       case 'renameFiles':
         log('DEBUG', 'Starting rename files feature');
@@ -164,6 +164,18 @@ async function main() {
       case 'sortFiles':
         log('DEBUG', 'Entering sort menu');
         await sortMenu();
+        break;
+      case 'cleanupFiles':
+        log('DEBUG', 'Entering cleanup menu');
+        await cleanupMenu();
+        break;
+      case 'resizeFiles':
+        log('DEBUG', 'Entering resize menu');
+        await resizeMenu();
+        break;
+      case 'updateMetadata':
+        log('DEBUG', 'Entering metadata menu');
+        await metadataMenu();
         break;
       case 'generateImages':
         log('DEBUG', 'Entering generate images menu');
@@ -194,6 +206,7 @@ async function main() {
         { title: 'Update PNG Metadata', value: 'png' },
         { title: 'Update WAV Metadata', value: 'wav' },
         { title: 'Update WebP Metadata', value: 'webp' },
+        { title: 'Update WebM Metadata', value: 'webm' },
         { title: 'Back', value: 'back' },
       ],
       initial: 0,
@@ -230,6 +243,10 @@ async function main() {
       case 'webp':
         log('DEBUG', 'Starting WebP metadata update');
         result = await updateWebpMetadata();
+        break;
+      case 'webm':
+        log('DEBUG', 'Starting WebM metadata update');
+        result = await updateWebmMetadata();
         break;
       default:
         log('WARN', `Invalid metadata type selected: ${metadataResponse.metadataType}`);
@@ -491,6 +508,50 @@ async function main() {
 
     log('DEBUG', 'Returning to sort menu');
     await sortMenu();
+  }
+
+  async function cleanupMenu() {
+    log('DEBUG', 'Prompting for cleanup type selection');
+    const cleanupResponse = await prompts({
+      type: 'select',
+      name: 'cleanupType',
+      message: 'Choose a cleanup type:',
+      choices: [
+        { title: 'Find Duplicate Images', value: 'findDuplicateImages' },
+        { title: 'Find Duplicate Videos', value: 'findDuplicateVideos' },
+        { title: 'Back', value: 'back' },
+      ],
+      initial: 0,
+    });
+
+    log('DEBUG', `User selected cleanup type: ${cleanupResponse.cleanupType}`);
+    if (!cleanupResponse.cleanupType || cleanupResponse.cleanupType === 'back') {
+      log('INFO', 'Returning to main menu.');
+      return;
+    }
+
+    let result;
+    switch (cleanupResponse.cleanupType) {
+      case 'findDuplicateImages':
+        log('INFO', 'Starting Find Duplicate Images Feature');
+        result = await findDuplicateImages();
+        break;
+      case 'findDuplicateVideos':
+        log('INFO', 'Starting Find Duplicate Videos Feature');
+        result = await findDuplicateVideos();
+        break;
+      default:
+        log('WARN', `Invalid cleanup type selected: ${cleanupResponse.cleanupType}`);
+        result = 'error';
+    }
+
+    log('DEBUG', `Cleanup result: ${result}`);
+    if (result === 'cancelled') log('INFO', 'Cleanup cancelled by user.');
+    else if (result === 'success') log('INFO', 'Cleanup completed successfully.');
+    else log('INFO', 'Cleanup failed.');
+
+    log('DEBUG', 'Returning to cleanup menu');
+    await cleanupMenu();
   }
 
   async function generateImagesMenu() {

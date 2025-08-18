@@ -60,6 +60,12 @@ async function processImage(inputPath, outputPath, width, height, method) {
       default:
         throw new Error(`Invalid resize method: ${method}`);
     }
+    try {
+      const stats = await fsPromises.stat(outputPath);
+      log('DEBUG', `Processed image size: ${stats.size} bytes for ${outputPath}`);
+    } catch (statError) {
+      log('DEBUG', `Failed to retrieve file size for ${outputPath}: ${statError.message}`);
+    }
     log('DEBUG', `Successfully processed ${inputPath} to ${outputPath}`);
     return true;
   } catch (error) {
@@ -75,13 +81,14 @@ function parseArgs(args) {
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--')) {
       const flag = args[i].slice(2);
-      if (!validFlags.includes(flag)) {
-        log('ERROR', `Invalid argument: --${flag}`);
-        return { error: true, message: `Invalid argument: --${flag}` };
+      if (validFlags.includes(flag)) {
+        const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
+        params[flag] = value;
+        i++;
+      } else {
+        log('DEBUG', `Ignoring unrecognized argument: --${flag}`);
+        if (args[i + 1] && !args[i + 1].startsWith('--')) i++; // Skip value of unrecognized flag
       }
-      const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
-      params[flag] = value;
-      i++;
     }
   }
   return params;

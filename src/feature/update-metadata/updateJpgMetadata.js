@@ -70,6 +70,13 @@ async function processJpgFile(inputFile, outputFile, metadata) {
   log('DEBUG', `Executing ExifTool command for ${outputFile}`);
   execSync(command, { stdio: 'inherit' });
   log('INFO', `Success: Metadata updated for ${outputFile}`);
+
+  try {
+    const stats = await fsPromises.stat(outputFile);
+    log('DEBUG', `Processed file size: ${stats.size} bytes for ${outputFile}`);
+  } catch (statError) {
+    log('DEBUG', `Failed to retrieve file size for ${outputFile}: ${statError.message}`);
+  }
 }
 
 function parseArgs(args) {
@@ -78,13 +85,14 @@ function parseArgs(args) {
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--')) {
       const flag = args[i].slice(2);
-      if (!validFlags.includes(flag)) {
-        log('ERROR', `Invalid argument: --${flag}`);
-        return { error: true, message: `Invalid argument: --${flag}` };
+      if (validFlags.includes(flag)) {
+        const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
+        params[flag] = value;
+        i++;
+      } else {
+        log('DEBUG', `Ignoring unrecognized argument: --${flag}`);
+        if (args[i + 1] && !args[i + 1].startsWith('--')) i++; // Skip value of unrecognized flag
       }
-      const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
-      params[flag] = value;
-      i++;
     }
   }
   return params;
@@ -212,7 +220,7 @@ async function updateJpgMetadata(args = process.argv.slice(2)) {
         return 'error';
       }
       const outputFile = path.join(outputDir, path.basename(inputPath));
-      await processJpgFile(inputPath, outputFile, metadata);
+      await processJpgFile(inputFile, outputFile, metadata);
     } else if (stats.isDirectory()) {
       log('DEBUG', `Reading directory: ${inputPath}`);
       const files = await fsPromises.readdir(inputPath);

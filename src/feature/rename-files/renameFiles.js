@@ -11,13 +11,14 @@ function parseArgs(args) {
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--')) {
       const flag = args[i].slice(2);
-      if (!validFlags.includes(flag)) {
-        log('ERROR', `Invalid argument: --${flag}`);
-        return { error: true, message: `Invalid argument: --${flag}` };
+      if (validFlags.includes(flag)) {
+        const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
+        params[flag] = value;
+        i++;
+      } else {
+        log('DEBUG', `Ignoring unrecognized argument: --${flag}`);
+        if (args[i + 1] && !args[i + 1].startsWith('--')) i++; // Skip value of unrecognized flag
       }
-      const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
-      params[flag] = value;
-      i++;
     }
   }
   return params;
@@ -116,6 +117,12 @@ async function renameFiles(args = process.argv.slice(2)) {
         if (file !== newFilePath) {
           await fs.rename(file, newFilePath);
           log('INFO', `Renamed ${path.basename(file)} to ${newFileName}`);
+          try {
+            const stats = await fs.stat(newFilePath);
+            log('DEBUG', `Renamed file size: ${stats.size} bytes for ${newFilePath}`);
+          } catch (statError) {
+            log('DEBUG', `Failed to retrieve file size for ${newFilePath}: ${statError.message}`);
+          }
         } else {
           log('DEBUG', `File already named correctly: ${file}`);
         }

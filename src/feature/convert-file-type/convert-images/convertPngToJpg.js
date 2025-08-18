@@ -10,7 +10,7 @@ async function processPngToJpg(inputFile, outputFile) {
   const command = `ffmpeg -i "${inputFile}" -vf "format=yuv420p" "${outputFile}" -y`;
   log('DEBUG', `Executing FFmpeg command: ${command}`);
   return new Promise((resolve, reject) => {
-    exec(command, (error, stdout, stderr) => {
+    exec(command, async (error, stdout, stderr) => {
       if (error) {
         log('ERROR', `ffmpeg error: ${error.message}`);
         log('DEBUG', `FFmpeg error stack: ${error.stack}`);
@@ -27,6 +27,13 @@ async function processPngToJpg(inputFile, outputFile) {
         log('DEBUG', `FFmpeg stderr (informational): ${stderr}`);
       }
       log('INFO', `Converted ${path.basename(inputFile)} to ${path.basename(outputFile)}`);
+      try {
+        const inputStats = await fs.stat(inputFile);
+        const outputStats = await fs.stat(outputFile);
+        log('DEBUG', `Input file size: ${inputStats.size} bytes, Output file size: ${outputStats.size} bytes`);
+      } catch (statError) {
+        log('DEBUG', `Failed to retrieve file sizes: ${statError.message}`);
+      }
       log('DEBUG', `Conversion successful: ${inputFile} -> ${outputFile}`);
       resolve();
     });
@@ -39,13 +46,14 @@ function parseArgs(args) {
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--')) {
       const flag = args[i].slice(2);
-      if (!validFlags.includes(flag)) {
-        log('ERROR', `Invalid argument: --${flag}`);
-        return { error: true, message: `Invalid argument: --${flag}` };
+      if (validFlags.includes(flag)) {
+        const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
+        params[flag] = value;
+        i++;
+      } else {
+        log('DEBUG', `Ignoring unrecognized argument: --${flag}`);
+        if (args[i + 1] && !args[i + 1].startsWith('--')) i++; // Skip value of unrecognized flag
       }
-      const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
-      params[flag] = value;
-      i++;
     }
   }
   return params;
@@ -128,7 +136,7 @@ async function convertPngToJpg(args = process.argv.slice(2)) {
       }
       const outputFile = path.join(outputDir, path.basename(inputPath, '.png') + '.jpg');
       log('DEBUG', `Generated output filename: ${outputFile}`);
-      await processPngToJpg(inputFile, outputFile);
+      await processPngToJpg(inputPath, outputFile);
     } else if (stats.isDirectory()) {
       log('DEBUG', `Reading directory: ${inputPath}`);
       const files = await fs.readdir(inputPath);

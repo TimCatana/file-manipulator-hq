@@ -11,7 +11,7 @@ async function processWebpToPng(inputFile, outputFile) {
   const command = `dwebp "${inputFile}" -o "${outputFile}"`;
   log('DEBUG', `Executing dwebp command: ${command}`);
   return new Promise((resolve, reject) => {
-    exec(command, (error, stdout, stderr) => {
+    exec(command, async (error, stdout, stderr) => {
       if (error) {
         log('ERROR', `dwebp error: ${error.message}`);
         log('DEBUG', `dwebp error stack: ${error.stack}`);
@@ -28,6 +28,13 @@ async function processWebpToPng(inputFile, outputFile) {
         log('DEBUG', `dwebp stderr (informational): ${stderr}`);
       }
       log('INFO', `Converted ${path.basename(inputFile)} to ${path.basename(outputFile)}`);
+      try {
+        const inputStats = await fs.stat(inputFile);
+        const outputStats = await fs.stat(outputFile);
+        log('DEBUG', `Input file size: ${inputStats.size} bytes, Output file size: ${outputStats.size} bytes`);
+      } catch (statError) {
+        log('DEBUG', `Failed to retrieve file sizes: ${statError.message}`);
+      }
       log('DEBUG', `Conversion successful: ${inputFile} -> ${outputFile}`);
       resolve();
     });
@@ -40,13 +47,14 @@ function parseArgs(args) {
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--')) {
       const flag = args[i].slice(2);
-      if (!validFlags.includes(flag)) {
-        log('ERROR', `Invalid argument: --${flag}`);
-        return { error: true, message: `Invalid argument: --${flag}` };
+      if (validFlags.includes(flag)) {
+        const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
+        params[flag] = value;
+        i++;
+      } else {
+        log('DEBUG', `Ignoring unrecognized argument: --${flag}`);
+        if (args[i + 1] && !args[i + 1].startsWith('--')) i++; // Skip value of unrecognized flag
       }
-      const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
-      params[flag] = value;
-      i++;
     }
   }
   return params;
