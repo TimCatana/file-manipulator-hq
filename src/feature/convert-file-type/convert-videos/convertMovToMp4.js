@@ -34,15 +34,15 @@ async function validateVideoStream(inputFile) {
   });
 }
 
-async function processMp4ToWebm(inputFile, outputFile, inputDir, params) {
+async function processMovToMp4(inputFile, outputFile, inputDir, params) {
   log('DEBUG', `Converting ${path.relative(inputDir, inputFile)} to ${path.relative(inputDir, outputFile)}`, { basePath: inputDir });
   return new Promise((resolve, reject) => {
     ffmpeg(inputFile)
-      .videoCodec('libvpx-vp9')
+      .videoCodec('libx264')
       .videoBitrate('1000k')
-      .audioCodec('libopus')
-      .outputOptions(['-y'])
-      .toFormat('webm')
+      .audioCodec('aac')
+      .outputOptions(['-vf scale=640:-1:flags=lanczos', '-y']) // Scale to 640 width, maintain aspect ratio
+      .toFormat('mp4')
       .on('start', (commandLine) => {
         log('DEBUG', `FFmpeg command: ${commandLine}`, { basePath: inputDir });
       })
@@ -103,10 +103,10 @@ async function pathExists(filePath) {
   }
 }
 
-async function convertMp4ToWebm(args = process.argv.slice(2)) {
+async function convertMovToMp4(args = process.argv.slice(2)) {
   let inputPath = null; // Initialize inputPath to avoid undefined reference
   try {
-    log('INFO', 'Starting MP4 to WebM Conversion Feature');
+    log('INFO', 'Starting MOV to MP4 Conversion Feature');
     const params = parseArgs(args);
     if (params.error) return 'error';
 
@@ -127,7 +127,7 @@ async function convertMp4ToWebm(args = process.argv.slice(2)) {
       const inputPathResponse = await prompts({
         type: 'text',
         name: 'path',
-        message: 'Enter the path to the input MP4 file or directory (or press Enter to cancel):',
+        message: 'Enter the path to the input MOV file or directory (or press Enter to cancel):',
         validate: async value => {
           if (value.trim() === '') return true;
           const resolvedPath = path.resolve(value);
@@ -184,8 +184,8 @@ async function convertMp4ToWebm(args = process.argv.slice(2)) {
     log('DEBUG', `Input path stats: ${stats.isFile() ? 'File' : 'Directory'}`, { basePath: path.dirname(inputPath) });
 
     if (stats.isFile()) {
-      if (!inputPath.toLowerCase().endsWith('.mp4')) {
-        log('ERROR', `Input file ${path.basename(inputPath)} must be an MP4.`, { basePath: path.dirname(inputPath) });
+      if (!inputPath.toLowerCase().endsWith('.mov')) {
+        log('ERROR', `Input file ${path.basename(inputPath)} must be a MOV.`, { basePath: path.dirname(inputPath) });
         return 'error';
       }
       if (!isValidFilePath(inputPath)) {
@@ -194,18 +194,18 @@ async function convertMp4ToWebm(args = process.argv.slice(2)) {
       }
       const isValid = await validateVideoStream(inputPath);
       if (!isValid) {
-        log('INFO', `Processed 0 of 1 MP4 files to WebM.`);
+        log('INFO', `Processed 0 of 1 MOV files to MP4.`);
         return 'success';
       }
-      const outputFile = path.join(outputDir, path.basename(inputPath, '.mp4') + '.webm');
+      const outputFile = path.join(outputDir, path.basename(inputPath, '.mov') + '.mp4');
       if (!isValidFilePath(outputFile)) {
         log('ERROR', `Invalid filename in output path: ${path.basename(outputFile)}`, { basePath: path.dirname(outputDir) });
         return 'error';
       }
       log('DEBUG', `Generated output filename: ${path.basename(outputFile)}`, { basePath: path.dirname(outputDir) });
       try {
-        await processMp4ToWebm(inputPath, outputFile, path.dirname(inputPath), params);
-        log('INFO', `Processed 1 of 1 MP4 files to WebM.`);
+        await processMovToMp4(inputPath, outputFile, path.dirname(inputPath), params);
+        log('INFO', `Processed 1 of 1 MOV files to MP4.`);
       } catch (error) {
         log('ERROR', `Failed to process ${path.basename(inputPath)}: ${error.message}`, { basePath: path.dirname(inputPath) });
         if (params.verbose) log('DEBUG', `Error stack: ${error.stack}`, { basePath: path.dirname(inputPath) });
@@ -214,33 +214,33 @@ async function convertMp4ToWebm(args = process.argv.slice(2)) {
     } else if (stats.isDirectory()) {
       log('DEBUG', `Reading directory: ${path.basename(inputPath)}`, { basePath: path.dirname(inputPath) });
       const files = await fs.readdir(inputPath);
-      const mp4Files = [];
+      const movFiles = [];
       log('DEBUG', `Checking ${files.length} files in directory: ${path.basename(inputPath)}`, { basePath: path.dirname(inputPath) });
       for (const file of files) {
-        if (file.toLowerCase().endsWith('.mp4') && isValidFilePath(file)) {
+        if (file.toLowerCase().endsWith('.mov') && isValidFilePath(file)) {
           const inputFile = path.join(inputPath, file);
           const isValid = await validateVideoStream(inputFile);
           if (isValid) {
-            mp4Files.push(file);
+            movFiles.push(file);
           }
         }
       }
-      log('DEBUG', `Found ${mp4Files.length} valid MP4 files: ${mp4Files.length > 0 ? mp4Files.map(f => path.relative(inputPath, path.join(inputPath, f))).join(', ') : 'none'}`, { basePath: inputPath });
-      if (mp4Files.length === 0) {
-        log('INFO', `No valid MP4 files found in ${path.basename(inputPath)}`, { basePath: path.dirname(inputPath) });
+      log('DEBUG', `Found ${movFiles.length} valid MOV files: ${movFiles.length > 0 ? movFiles.map(f => path.relative(inputPath, path.join(inputPath, f))).join(', ') : 'none'}`, { basePath: inputPath });
+      if (movFiles.length === 0) {
+        log('INFO', `No valid MOV files found in ${path.basename(inputPath)}`, { basePath: path.dirname(inputPath) });
         return 'success';
       }
       let processedCount = 0;
-      for (const file of mp4Files) {
+      for (const file of movFiles) {
         const inputFile = path.join(inputPath, file);
-        const outputFile = path.join(outputDir, path.basename(file, '.mp4') + '.webm');
+        const outputFile = path.join(outputDir, path.basename(file, '.mov') + '.mp4');
         if (!isValidFilePath(outputFile)) {
           log('ERROR', `Invalid filename in output path: ${path.basename(outputFile)}`, { basePath: path.dirname(outputDir) });
           continue;
         }
         log('DEBUG', `Generated output filename: ${path.basename(outputFile)}`, { basePath: path.dirname(outputDir) });
         try {
-          await processMp4ToWebm(inputFile, outputFile, inputPath, params);
+          await processMovToMp4(inputFile, outputFile, inputPath, params);
           processedCount++;
         } catch (error) {
           log('ERROR', `Failed to process ${path.basename(inputFile)}: ${error.message}`, { basePath: inputPath });
@@ -248,21 +248,21 @@ async function convertMp4ToWebm(args = process.argv.slice(2)) {
           continue;
         }
       }
-      log('INFO', `Processed ${processedCount} of ${mp4Files.length} MP4 files to WebM.`);
+      log('INFO', `Processed ${processedCount} of ${movFiles.length} MOV files to MP4.`);
     }
 
-    log('DEBUG', 'MP4 to WebM Conversion completed successfully');
+    log('DEBUG', 'MOV to MP4 Conversion completed successfully');
     return 'success';
   } catch (error) {
-    log('ERROR', `Unexpected error in MP4 to WebM Conversion: ${error.message}`, { basePath: inputPath || BASE_DIR });
+    log('ERROR', `Unexpected error in MOV to MP4 Conversion: ${error.message}`, { basePath: inputPath || BASE_DIR });
     if (params.verbose) log('DEBUG', `Error stack: ${error.stack}`, { basePath: inputPath || BASE_DIR });
     return 'error';
   }
 }
 
 if (require.main === module) {
-  let params = parseArgs(process.argv.slice(2));
-  convertMp4ToWebm(params).then(result => {
+  const params = parseArgs(process.argv.slice(2));
+  convertMovToMp4(params).then(result => {
     process.exit(result === 'success' ? 0 : 1);
   }).catch(err => {
     log('ERROR', `Fatal error: ${err.message}`, { basePath: BASE_DIR });
@@ -270,4 +270,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { convertMp4ToWebm };
+module.exports = { convertMovToMp4 };

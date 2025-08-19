@@ -13,13 +13,29 @@ const { updatePngMetadata } = require('./feature/update-metadata/updatePngMetada
 const { updateWavMetadata } = require('./feature/update-metadata/updateWavMetadata');
 const { updateWebpMetadata } = require('./feature/update-metadata/updateWebpMetadata');
 const { updateWebmMetadata } = require('./feature/update-metadata/updateWebmMetadata');
-// Convert File Type Imports
+// Convert Video File Type Imports
 const { convertGifToMp4 } = require('./feature/convert-file-type/convert-videos/convertGifToMp4');
+const { convertGifToMov } = require('./feature/convert-file-type/convert-videos/convertGifToMov');
 const { convertGifToWebm } = require('./feature/convert-file-type/convert-videos/convertGifToWebm');
 const { convertMp4ToGif } = require('./feature/convert-file-type/convert-videos/convertMp4ToGif');
+const { convertMp4ToMov } = require('./feature/convert-file-type/convert-videos/convertMp4ToMov');
 const { convertMp4ToWebm } = require('./feature/convert-file-type/convert-videos/convertMp4ToWebm');
+const { convertMovToGif } = require('./feature/convert-file-type/convert-videos/convertMovToGif');
+const { convertMovToMp4 } = require('./feature/convert-file-type/convert-videos/convertMovToMp4');
+const { convertMovToWebm } = require('./feature/convert-file-type/convert-videos/convertMovToWebm');
 const { convertWebmToGif } = require('./feature/convert-file-type/convert-videos/convertWebmToGif');
+const { convertWebmToMov } = require('./feature/convert-file-type/convert-videos/convertWebmToMov');
 const { convertWebmToMp4 } = require('./feature/convert-file-type/convert-videos/convertWebmToMp4');
+// Convert Audio File Type Imports
+const { convertGifToMp3 } = require('./feature/convert-file-type/convert-video-to-audio/convertGifToMp3');
+const { convertGifToWav } = require('./feature/convert-file-type/convert-video-to-audio/convertGifToWav');
+const { convertMovToMp3 } = require('./feature/convert-file-type/convert-video-to-audio/convertMovToMp3');
+const { convertMovToWav } = require('./feature/convert-file-type/convert-video-to-audio/convertMovToWav');
+const { convertMp4ToMp3 } = require('./feature/convert-file-type/convert-video-to-audio/convertMp4ToMp3');
+const { convertMp4ToWav } = require('./feature/convert-file-type/convert-video-to-audio/convertMp4ToWav');
+const { convertWebmToMp3 } = require('./feature/convert-file-type/convert-video-to-audio/convertWebmToMp3');
+const { convertWebmToWav } = require('./feature/convert-file-type/convert-video-to-audio/convertWebmToWav');
+// Convert Image File Type Imports
 const { convertJpgToPng } = require('./feature/convert-file-type/convert-images/convertJpgToPng');
 const { convertJpgToWebp } = require('./feature/convert-file-type/convert-images/convertJpgToWebp');
 const { convertPngToJpg } = require('./feature/convert-file-type/convert-images/convertPngToJpg');
@@ -48,6 +64,30 @@ const BIN_DIR = path.join(BASE_DIR, 'bin');
 const JSON_DIR = path.join(BASE_DIR, 'json');
 const LOG_DIR = path.join(BASE_DIR, 'logs');
 
+// Parse command-line arguments
+function parseArgs(args) {
+  const validFlags = ['help', 'v', 'version', 'verbose'];
+  const params = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith('--')) {
+      const flag = args[i].slice(2);
+      if (validFlags.includes(flag)) {
+        params[flag] = true;
+      } else {
+        log('WARN', `Ignoring unrecognized argument: --${flag}`);
+      }
+    } else if (args[i].startsWith('-')) {
+      const flag = args[i].slice(1);
+      if (validFlags.includes(flag)) {
+        params[flag] = true;
+      } else {
+        log('WARN', `Ignoring unrecognized argument: -${flag}`);
+      }
+    }
+  }
+  return params;
+}
+
 // Help message
 function displayHelp() {
   const helpText = `
@@ -63,7 +103,8 @@ Options:
 
 Features:
   - Convert File Type:
-    - Videos: GIF to MP4/WebM, MP4 to GIF/WebM, WebM to GIF/MP4
+    - Videos: GIF to MP4/MOV/WebM, MOV to GIF/MP4/WebM, MP4 to GIF/MOV/WebM, WebM to GIF/MOV/MP4
+    - Video to Audio: GIF to MP3/WAV, MOV to MP3/WAV, MP4 to MP3/WAV, WebM to MP3/WAV
     - Images: JPG to PNG/WebP, PNG to JPG/WebP, WebP to JPG/PNG
   - Rename Files
   - Sort Files:
@@ -81,40 +122,52 @@ Features:
   - Generate Videos:
 
 Directories:
-  - Bin: ${BIN_DIR}
-  - JSON: ${JSON_DIR}
-  - Logs: ${LOG_DIR}
+  - Bin: ${path.relative(BASE_DIR, BIN_DIR)}
+  - JSON: ${path.relative(BASE_DIR, JSON_DIR)}
+  - Logs: ${path.relative(BASE_DIR, LOG_DIR)}
   `;
-  log('INFO', helpText);
+  log('INFO', helpText, { basePath: BASE_DIR });
 }
 
 // Ensure base directories exist
 async function ensureDirectories() {
   const dirs = [BIN_DIR, JSON_DIR, LOG_DIR];
-  log('DEBUG', `Ensuring directories exist: ${dirs.join(', ')}`);
+  const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+  log('DEBUG', `Ensuring directories exist: ${dirs.map(dir => path.relative(BASE_DIR, dir)).join(', ')}`, { basePath: BASE_DIR });
   try {
+    for (const dir of dirs) {
+      if (forbiddenDirs.some(forbidden => path.resolve(dir).startsWith(path.resolve(forbidden)))) {
+        log('ERROR', `Directory ${path.relative(BASE_DIR, dir)} is a system directory and cannot be created.`, { basePath: BASE_DIR });
+        throw new Error('System directory access denied');
+      }
+      if (!path.resolve(dir).startsWith(path.resolve(BASE_DIR))) {
+        log('ERROR', `Directory ${path.relative(BASE_DIR, dir)} is outside project root.`, { basePath: BASE_DIR });
+        throw new Error('Directory outside project root');
+      }
+    }
     await Promise.all(
       dirs.map((dir) => fs.promises.mkdir(dir, { recursive: true }))
     );
     log('INFO', 'All required base directories are present.');
-    log('DEBUG', `Successfully created/verified directories: ${dirs.join(', ')}`);
+    log('DEBUG', `Successfully created/verified directories: ${dirs.map(dir => path.relative(BASE_DIR, dir)).join(', ')}`, { basePath: BASE_DIR });
   } catch (err) {
-    log('ERROR', `Failed to create base directories: ${err.message}`);
-    log('DEBUG', `Directory creation error stack: ${err.stack}`);
+    log('ERROR', `Failed to create base directories: ${err.message}`, { basePath: BASE_DIR });
+    if (params.verbose) log('DEBUG', `Directory creation error stack: ${err.stack}`, { basePath: BASE_DIR });
   }
 }
 
 // Main execution
 async function main() {
   const args = process.argv.slice(2);
+  const params = parseArgs(args);
   setupConsoleLogging(args, LOG_DIR); // Pass LOG_DIR to setupConsoleLogging
-  log('DEBUG', `Starting main execution with args: ${args.join(', ')}`);
+  log('DEBUG', `Starting main execution with args: ${args.join(', ')}`, { basePath: BASE_DIR });
 
-  if (args.includes('--help')) {
+  if (params.help) {
     displayHelp();
     return;
   }
-  if (args.includes('-v') || args.includes('--version')) {
+  if (params.v || params.version) {
     log('INFO', 'Metadata Update, File Conversion, Resize, Rename, Sort, Cleanup & Media Generation Console App v1.0.0');
     return;
   }
@@ -186,7 +239,8 @@ async function main() {
         await generateVideosMenu();
         break;
       default:
-        log('WARN', `Unknown choice selected: ${initialResponse.choice}`);
+        log('WARN', `Invalid choice selected: ${initialResponse.choice}`);
+        break;
     }
 
     log('DEBUG', 'Returning to main menu');
@@ -251,6 +305,7 @@ async function main() {
       default:
         log('WARN', `Invalid metadata type selected: ${metadataResponse.metadataType}`);
         result = 'error';
+        break;
     }
 
     log('DEBUG', `Metadata update result: ${result}`);
@@ -270,6 +325,7 @@ async function main() {
       message: 'Choose a conversion type:',
       choices: [
         { title: 'Convert Videos', value: 'videos' },
+        { title: 'Convert Video to Audio', value: 'audio' },
         { title: 'Convert Images', value: 'images' },
         { title: 'Back', value: 'back' },
       ],
@@ -285,9 +341,14 @@ async function main() {
     if (convertResponse.convertType === 'videos') {
       log('DEBUG', 'Entering video convert menu');
       await videoConvertMenu();
+    } else if (convertResponse.convertType === 'audio') {
+      log('DEBUG', 'Entering audio convert menu');
+      await audioConvertMenu();
     } else if (convertResponse.convertType === 'images') {
       log('DEBUG', 'Entering image convert menu');
       await imageConvertMenu();
+    } else {
+      log('WARN', `Invalid convert type selected: ${convertResponse.convertType}`);
     }
 
     log('DEBUG', 'Returning to convert menu');
@@ -302,10 +363,16 @@ async function main() {
       message: 'Choose a video conversion:',
       choices: [
         { title: 'GIF to MP4', value: 'gifToMp4' },
+        { title: 'GIF to MOV', value: 'gifToMov' },
         { title: 'GIF to WebM', value: 'gifToWebm' },
+        { title: 'MOV to GIF', value: 'movToGif' },
+        { title: 'MOV to MP4', value: 'movToMp4' },
+        { title: 'MOV to WebM', value: 'movToWebm' },
         { title: 'MP4 to GIF', value: 'mp4ToGif' },
+        { title: 'MP4 to MOV', value: 'mp4ToMov' },
         { title: 'MP4 to WebM', value: 'mp4ToWebm' },
         { title: 'WebM to GIF', value: 'webmToGif' },
+        { title: 'WebM to MOV', value: 'webmToMov' },
         { title: 'WebM to MP4', value: 'webmToMp4' },
         { title: 'Back', value: 'back' },
       ],
@@ -324,13 +391,33 @@ async function main() {
         log('DEBUG', 'Starting GIF to MP4 conversion');
         result = await convertGifToMp4();
         break;
+      case 'gifToMov':
+        log('DEBUG', 'Starting GIF to MOV conversion');
+        result = await convertGifToMov();
+        break;
       case 'gifToWebm':
         log('DEBUG', 'Starting GIF to WebM conversion');
         result = await convertGifToWebm();
         break;
+      case 'movToGif':
+        log('DEBUG', 'Starting MOV to GIF conversion');
+        result = await convertMovToGif();
+        break;
+      case 'movToMp4':
+        log('DEBUG', 'Starting MOV to MP4 conversion');
+        result = await convertMovToMp4();
+        break;
+      case 'movToWebm':
+        log('DEBUG', 'Starting MOV to WebM conversion');
+        result = await convertMovToWebm();
+        break;
       case 'mp4ToGif':
         log('DEBUG', 'Starting MP4 to GIF conversion');
         result = await convertMp4ToGif();
+        break;
+      case 'mp4ToMov':
+        log('DEBUG', 'Starting MP4 to MOV conversion');
+        result = await convertMp4ToMov();
         break;
       case 'mp4ToWebm':
         log('DEBUG', 'Starting MP4 to WebM conversion');
@@ -340,6 +427,10 @@ async function main() {
         log('DEBUG', 'Starting WebM to GIF conversion');
         result = await convertWebmToGif();
         break;
+      case 'webmToMov':
+        log('DEBUG', 'Starting WebM to MOV conversion');
+        result = await convertWebmToMov();
+        break;
       case 'webmToMp4':
         log('DEBUG', 'Starting WebM to MP4 conversion');
         result = await convertWebmToMp4();
@@ -347,6 +438,7 @@ async function main() {
       default:
         log('WARN', `Invalid video conversion selected: ${videoResponse.conversion}`);
         result = 'error';
+        break;
     }
 
     log('DEBUG', `Video conversion result: ${result}`);
@@ -356,6 +448,81 @@ async function main() {
 
     log('DEBUG', 'Returning to video convert menu');
     await videoConvertMenu();
+  }
+
+  async function audioConvertMenu() {
+    log('DEBUG', 'Prompting for audio conversion selection');
+    const audioResponse = await prompts({
+      type: 'select',
+      name: 'conversion',
+      message: 'Choose a video to audio conversion:',
+      choices: [
+        { title: 'GIF to MP3', value: 'gifToMp3' },
+        { title: 'GIF to WAV', value: 'gifToWav' },
+        { title: 'MOV to MP3', value: 'movToMp3' },
+        { title: 'MOV to WAV', value: 'movToWav' },
+        { title: 'MP4 to MP3', value: 'mp4ToMp3' },
+        { title: 'MP4 to WAV', value: 'mp4ToWav' },
+        { title: 'WebM to MP3', value: 'webmToMp3' },
+        { title: 'WebM to WAV', value: 'webmToWav' },
+        { title: 'Back', value: 'back' },
+      ],
+      initial: 0,
+    });
+
+    log('DEBUG', `User selected audio conversion: ${audioResponse.conversion}`);
+    if (!audioResponse.conversion || audioResponse.conversion === 'back') {
+      log('INFO', 'Returning to conversion type menu.');
+      return;
+    }
+
+    let result;
+    switch (audioResponse.conversion) {
+      case 'gifToMp3':
+        log('DEBUG', 'Starting GIF to MP3 conversion');
+        result = await convertGifToMp3();
+        break;
+      case 'gifToWav':
+        log('DEBUG', 'Starting GIF to WAV conversion');
+        result = await convertGifToWav();
+        break;
+      case 'movToMp3':
+        log('DEBUG', 'Starting MOV to MP3 conversion');
+        result = await convertMovToMp3();
+        break;
+      case 'movToWav':
+        log('DEBUG', 'Starting MOV to WAV conversion');
+        result = await convertMovToWav();
+        break;
+      case 'mp4ToMp3':
+        log('DEBUG', 'Starting MP4 to MP3 conversion');
+        result = await convertMp4ToMp3();
+        break;
+      case 'mp4ToWav':
+        log('DEBUG', 'Starting MP4 to WAV conversion');
+        result = await convertMp4ToWav();
+        break;
+      case 'webmToMp3':
+        log('DEBUG', 'Starting WebM to MP3 conversion');
+        result = await convertWebmToMp3();
+        break;
+      case 'webmToWav':
+        log('DEBUG', 'Starting WebM to WAV conversion');
+        result = await convertWebmToWav();
+        break;
+      default:
+        log('WARN', `Invalid audio conversion selected: ${audioResponse.conversion}`);
+        result = 'error';
+        break;
+    }
+
+    log('DEBUG', `Audio conversion result: ${result}`);
+    if (result === 'cancelled') log('INFO', 'Audio conversion cancelled by user.');
+    else if (result === 'success') log('INFO', 'Audio conversion completed successfully.');
+    else log('INFO', 'Audio conversion failed.');
+
+    log('DEBUG', 'Returning to audio convert menu');
+    await audioConvertMenu();
   }
 
   async function imageConvertMenu() {
@@ -411,6 +578,7 @@ async function main() {
       default:
         log('WARN', `Invalid image conversion selected: ${imageResponse.conversion}`);
         result = 'error';
+        break;
     }
 
     log('DEBUG', `Image conversion result: ${result}`);
@@ -455,6 +623,7 @@ async function main() {
       default:
         log('WARN', `Invalid resize type selected: ${resizeResponse.resizeType}`);
         result = 'error';
+        break;
     }
 
     log('DEBUG', `Resize result: ${result}`);
@@ -499,6 +668,7 @@ async function main() {
       default:
         log('WARN', `Invalid sort type selected: ${sortResponse.sortType}`);
         result = 'error';
+        break;
     }
 
     log('DEBUG', `Sort result: ${result}`);
@@ -543,6 +713,7 @@ async function main() {
       default:
         log('WARN', `Invalid cleanup type selected: ${cleanupResponse.cleanupType}`);
         result = 'error';
+        break;
     }
 
     log('DEBUG', `Cleanup result: ${result}`);
@@ -592,6 +763,7 @@ async function main() {
       default:
         log('WARN', `Invalid generate type selected: ${generateResponse.generateType}`);
         result = 'error';
+        break;
     }
 
     log('DEBUG', `Image generation result: ${result}`);
@@ -621,18 +793,10 @@ async function main() {
       return;
     }
 
-    let result;
-    switch (generateResponse.generateType) {
-      default:
-        log('WARN', `Invalid generate type selected: ${generateResponse.generateType}`);
-        result = 'error';
-    }
-
+    log('WARN', `Invalid generate type selected: ${generateResponse.generateType}`);
+    const result = 'error';
     log('DEBUG', `Video generation result: ${result}`);
-    if (result === 'cancelled') log('INFO', 'Video generation cancelled by user.');
-    else if (result === 'success') log('INFO', 'Video generation completed successfully.');
-    else log('INFO', 'Video generation failed.');
-
+    log('INFO', 'Video generation failed.');
     log('DEBUG', 'Returning to generate videos menu');
     await generateVideosMenu();
   }
@@ -642,9 +806,10 @@ async function main() {
 }
 
 if (require.main === module) {
+  let params = {};
   main().catch(err => {
-    log('ERROR', `Unexpected error in main: ${err.message}`);
-    log('DEBUG', `Main error stack: ${err.stack}`);
+    log('ERROR', `Unexpected error in main: ${err.message}`, { basePath: BASE_DIR });
+    if (params.verbose) log('DEBUG', `Main error stack: ${err.stack}`, { basePath: BASE_DIR });
     process.exit(1);
   });
 }

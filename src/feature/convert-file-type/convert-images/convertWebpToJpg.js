@@ -3,91 +3,114 @@
 const prompts = require('prompts');
 const fs = require('fs').promises;
 const path = require('path');
-const { exec } = require('child_process');
+const webp = require('webp-converter');
+const ffmpeg = require('fluent-ffmpeg');
 const { log } = require('../../../backend/utils/logUtils');
 
-async function processWebpToJpg(inputFile, outputFile) {
-  const tempPng = path.join(path.dirname(inputFile), `${path.basename(inputFile, '.webp')}-temp.png`);
-  const command1 = `dwebp "${inputFile}" -o "${tempPng}"`;
-  const command2 = `ffmpeg -i "${tempPng}" -vf "format=yuv420p" "${outputFile}" -y`;
-  log('DEBUG', `Executing dwebp command: ${command1}`);
-  
+// Configuration
+const BASE_DIR = path.join(__dirname, '..', '..', '..');
+
+async function validateImageStream(inputFile) {
+  return new Promise((resolve) => {
+    log('DEBUG', `Running ffprobe on ${path.basename(inputFile)}`, { basePath: path.dirname(inputFile) });
+    ffmpeg.ffprobe(inputFile, (err, metadata) => {
+      if (err) {
+        log('DEBUG', `FFprobe error for ${path.basename(inputFile)}: ${err.message}`, { basePath: path.dirname(inputFile) });
+        log('INFO', `Skipping ${path.basename(inputFile)}: not a valid image. May be a video with wrong extension.`, { basePath: path.dirname(inputFile) });
+        resolve(false);
+      } else {
+        log('DEBUG', `FFprobe metadata for ${path.basename(inputFile)}: ${JSON.stringify(metadata.streams, null, 2)}`, { basePath: path.dirname(inputFile) });
+        const hasValidImage = metadata.streams.some(
+          stream => stream.codec_type === 'video' && 
+          Number(stream.nb_frames) <= 1 && // Single frame for images
+          (!stream.duration || parseFloat(stream.duration) < 0.1) // No significant duration
+        );
+        if (!hasValidImage) {
+          log('INFO', `Skipping ${path.basename(inputFile)}: not a valid image. May be a video with wrong extension.`, { basePath: path.dirname(inputFile) });
+        }
+        log('DEBUG', `Validation result for ${path.basename(inputFile)}: ${hasValidImage}`, { basePath: path.dirname(inputFile) });
+        resolve(hasValidImage);
+      }
+    });
+  });
+}
+
+async function processWebpToJpg(inputFile, outputFile, inputDir, params) {
+  const tempPng = path.join(path.dirname(inputFile), `${path.basename(inputFile, '.webp')}-temp-${Date.now()}.png`);
+  log('DEBUG', `Converting ${path.relative(inputDir, inputFile)} to ${path.relative(inputDir, outputFile)} via temp file ${path.relative(inputDir, tempPng)}`, { basePath: inputDir });
   return new Promise((resolve, reject) => {
-    exec(command1, async (error1, stdout1, stderr1) => {
-      if (error1) {
-        log('ERROR', `dwebp error: ${error1.message}`);
-        log('DEBUG', `dwebp error stack: ${error1.stack}`);
-        reject(error1);
+    webp.dwebp(inputFile, tempPng, "", (status, error) => {
+      if (status !== 0 || error) {
+        log('ERROR', `dwebp error for ${path.relative(inputDir, inputFile)}: ${error || 'Unknown error'}`, { basePath: inputDir });
+        if (params.verbose) log('DEBUG', `dwebp error status: ${status}`, { basePath: inputDir });
+        reject(new Error(error || 'dwebp failed'));
         return;
       }
-      if (stderr1 && stderr1.toLowerCase().includes('error')) {
-        log('ERROR', `dwebp stderr: ${stderr1}`);
-        log('DEBUG', `dwebp stderr details: ${stderr1}`);
-        reject(new Error(stderr1));
-        return;
-      }
-      if (stderr1) {
-        log('DEBUG', `dwebp stderr (informational): ${stderr1}`);
-      }
-
-      log('DEBUG', `Executing FFmpeg command: ${command2}`);
-      exec(command2, async (error2, stdout2, stderr2) => {
-        // Always attempt to delete the temporary PNG file
-        try {
-          await fs.unlink(tempPng);
-          log('DEBUG', `Deleted temporary file: ${tempPng}`);
-        } catch (unlinkError) {
-          log('WARN', `Failed to delete temporary file ${tempPng}: ${unlinkError.message}`);
-        }
-
-        if (error2) {
-          log('ERROR', `ffmpeg error: ${error2.message}`);
-          log('DEBUG', `FFmpeg error stack: ${error2.stack}`);
-          reject(error2);
-          return;
-        }
-        if (stderr2 && stderr2.toLowerCase().includes('error')) {
-          log('ERROR', `ffmpeg stderr: ${stderr2}`);
-          log('DEBUG', `FFmpeg stderr details: ${stderr2}`);
-          reject(new Error(stderr2));
-          return;
-        }
-        if (stderr2) {
-          log('DEBUG', `FFmpeg stderr (informational): ${stderr2}`);
-        }
-
-        log('INFO', `Converted ${path.basename(inputFile)} to ${path.basename(outputFile)}`);
-        try {
-          const inputStats = await fs.stat(inputFile);
-          const outputStats = await fs.stat(outputFile);
-          log('DEBUG', `Input file size: ${inputStats.size} bytes, Output file size: ${outputStats.size} bytes`);
-        } catch (statError) {
-          log('DEBUG', `Failed to retrieve file sizes: ${statError.message}`);
-        }
-        log('DEBUG', `Conversion successful: ${inputFile} -> ${outputFile}`);
-        resolve();
-      });
+      ffmpeg(tempPng)
+        .outputOptions(['-vf format=yuv420p', '-y'])
+        .toFormat('jpg')
+        .on('start', (commandLine) => {
+          log('DEBUG', `FFmpeg command: ${commandLine}`, { basePath: inputDir });
+        })
+        .on('end', async () => {
+          try {
+            await fs.unlink(tempPng);
+            log('DEBUG', `Deleted temporary file: ${path.relative(inputDir, tempPng)}`, { basePath: inputDir });
+          } catch (unlinkError) {
+            log('WARN', `Failed to delete temporary file ${path.relative(inputDir, tempPng)}: ${unlinkError.message}`, { basePath: inputDir });
+          }
+          log('INFO', `Converted ${path.relative(inputDir, inputFile)} to ${path.relative(inputDir, outputFile)}`, { basePath: inputDir });
+          log('INFO', `Output file location: ${path.resolve(outputFile)}`, { basePath: inputDir });
+          fs.stat(inputFile)
+            .then(inputStats => fs.stat(outputFile).then(outputStats => ({ inputStats, outputStats })))
+            .then(({ inputStats, outputStats }) => {
+              log('DEBUG', `Input file size: ${inputStats.size} bytes, Output file size: ${outputStats.size} bytes`, { basePath: inputDir });
+              log('DEBUG', `Conversion successful: ${path.relative(inputDir, inputFile)} -> ${path.relative(inputDir, outputFile)}`, { basePath: inputDir });
+              resolve();
+            })
+            .catch(statError => {
+              log('DEBUG', `Failed to retrieve file sizes: ${statError.message}`, { basePath: inputDir });
+              resolve();
+            });
+        })
+        .on('error', async (error) => {
+          try {
+            await fs.unlink(tempPng);
+            log('DEBUG', `Deleted temporary file: ${path.relative(inputDir, tempPng)}`, { basePath: inputDir });
+          } catch (unlinkError) {
+            log('WARN', `Failed to delete temporary file ${path.relative(inputDir, tempPng)}: ${unlinkError.message}`, { basePath: inputDir });
+          }
+          log('ERROR', `FFmpeg error for ${path.relative(inputDir, inputFile)}: ${error.message}`, { basePath: inputDir });
+          if (params.verbose) log('DEBUG', `FFmpeg error stack: ${error.stack}`, { basePath: inputDir });
+          reject(error);
+        })
+        .save(outputFile);
     });
   });
 }
 
 function parseArgs(args) {
   const params = {};
-  const validFlags = ['input', 'output'];
+  const validFlags = ['input', 'output', 'verbose'];
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--')) {
       const flag = args[i].slice(2);
       if (validFlags.includes(flag)) {
         const value = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : '';
-        params[flag] = value;
+        params[flag] = value || true;
         i++;
       } else {
-        log('DEBUG', `Ignoring unrecognized argument: --${flag}`);
-        if (args[i + 1] && !args[i + 1].startsWith('--')) i++; // Skip value of unrecognized flag
+        log('DEBUG', `Ignoring unrecognized argument: --${flag}`, { basePath: BASE_DIR });
+        if (args[i + 1] && !args[i + 1].startsWith('--')) i++;
       }
     }
   }
   return params;
+}
+
+function isValidFilePath(filePath) {
+  const validPathRegex = /^[a-zA-Z0-9._-][a-zA-Z0-9._-]*(?:\.[a-zA-Z0-9]+)?$/;
+  return validPathRegex.test(path.basename(filePath));
 }
 
 async function pathExists(filePath) {
@@ -100,20 +123,24 @@ async function pathExists(filePath) {
 }
 
 async function convertWebpToJpg(args = process.argv.slice(2)) {
+  let inputPath = null; // Initialize inputPath to avoid undefined reference
   try {
     log('INFO', 'Starting WebP to JPG Conversion Feature');
-
     const params = parseArgs(args);
     if (params.error) return 'error';
 
-    let inputPath;
+    const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
     if (params['input']) {
-      inputPath = params['input'];
-      if (!(await pathExists(inputPath))) {
-        log('ERROR', `Input path not found: ${inputPath}`);
+      inputPath = path.resolve(params['input']);
+      if (forbiddenDirs.some(dir => inputPath.startsWith(path.resolve(dir)))) {
+        log('ERROR', `Input path ${path.basename(inputPath)} is in a system directory.`, { basePath: path.dirname(inputPath) });
         return 'error';
       }
-      log('DEBUG', `Input path from args: ${inputPath}`);
+      if (!(await pathExists(inputPath))) {
+        log('ERROR', `Input path not found: ${path.basename(inputPath)}`, { basePath: path.dirname(inputPath) });
+        return 'error';
+      }
+      log('DEBUG', `Input path from args: ${path.basename(inputPath)}`, { basePath: path.dirname(inputPath) });
     } else {
       log('DEBUG', 'Prompting for input path');
       const inputPathResponse = await prompts({
@@ -122,11 +149,15 @@ async function convertWebpToJpg(args = process.argv.slice(2)) {
         message: 'Enter the path to the input WebP file or directory (or press Enter to cancel):',
         validate: async value => {
           if (value.trim() === '') return true;
-          return (await pathExists(value)) ? true : 'Path not found.';
+          const resolvedPath = path.resolve(value);
+          if (forbiddenDirs.some(dir => resolvedPath.startsWith(path.resolve(dir)))) {
+            return 'System directory not allowed.';
+          }
+          return (await pathExists(resolvedPath)) ? true : 'Path not found.';
         },
       });
-      inputPath = inputPathResponse.path;
-      log('DEBUG', `Input path provided: ${inputPath}`);
+      inputPath = inputPathResponse.path ? path.resolve(inputPathResponse.path) : null;
+      log('DEBUG', `Input path provided: ${inputPath ? path.basename(inputPath) : 'none'}`, { basePath: inputPath ? path.dirname(inputPath) : BASE_DIR });
       if (!inputPath) {
         log('INFO', 'No input path provided, cancelling...');
         return 'cancelled';
@@ -135,71 +166,125 @@ async function convertWebpToJpg(args = process.argv.slice(2)) {
 
     let outputDir;
     if (params['output']) {
-      outputDir = params['output'];
-      log('DEBUG', `Output directory from args: ${outputDir}`);
+      outputDir = path.resolve(params['output']);
+      if (forbiddenDirs.some(dir => outputDir.startsWith(path.resolve(dir)))) {
+        log('ERROR', `Output directory ${path.basename(outputDir)} is in a system directory.`, { basePath: path.dirname(outputDir) });
+        return 'error';
+      }
+      log('DEBUG', `Output directory from args: ${path.basename(outputDir)}`, { basePath: path.dirname(outputDir) });
     } else {
       log('DEBUG', 'Prompting for output directory');
       const outputPathResponse = await prompts({
         type: 'text',
         name: 'path',
         message: 'Enter the path for the output directory (or press Enter to cancel):',
-        validate: value => (value.trim() !== '' ? true : 'Output directory required.'),
+        validate: value => {
+          if (value.trim() === '') return 'Output directory required.';
+          const resolvedPath = path.resolve(value);
+          if (forbiddenDirs.some(dir => resolvedPath.startsWith(path.resolve(dir)))) {
+            return 'System directory not allowed.';
+          }
+          return true;
+        },
       });
-      outputDir = outputPathResponse.path;
-      log('DEBUG', `Output directory provided: ${outputDir}`);
+      outputDir = outputPathResponse.path ? path.resolve(outputPathResponse.path) : null;
+      log('DEBUG', `Output directory provided: ${outputDir ? path.basename(outputDir) : 'none'}`, { basePath: outputDir ? path.dirname(outputDir) : BASE_DIR });
       if (!outputDir) {
         log('INFO', 'No output directory provided, cancelling...');
         return 'cancelled';
       }
     }
 
-    log('DEBUG', `Creating output directory: ${outputDir}`);
+    log('DEBUG', `Creating output directory: ${path.basename(outputDir)}`, { basePath: path.dirname(outputDir) });
     await fs.mkdir(outputDir, { recursive: true });
-    log('DEBUG', `Output directory created or verified: ${outputDir}`);
+    log('DEBUG', `Output directory created or verified: ${path.basename(outputDir)}`, { basePath: path.dirname(outputDir) });
 
     const stats = await fs.stat(inputPath);
-    log('DEBUG', `Input path stats: ${stats.isFile() ? 'File' : 'Directory'}`);
+    log('DEBUG', `Input path stats: ${stats.isFile() ? 'File' : 'Directory'}`, { basePath: path.dirname(inputPath) });
 
     if (stats.isFile()) {
       if (!inputPath.toLowerCase().endsWith('.webp')) {
-        log('ERROR', 'Input file must be a WebP.');
+        log('ERROR', `Input file ${path.basename(inputPath)} must be a WebP.`, { basePath: path.dirname(inputPath) });
         return 'error';
       }
-      const outputFile = path.join(outputDir, path.basename(inputPath, '.webp') + '.jpg');
-      log('DEBUG', `Generated output filename: ${outputFile}`);
-      await processWebpToJpg(inputPath, outputFile);
-    } else if (stats.isDirectory()) {
-      log('DEBUG', `Reading directory: ${inputPath}`);
-      const files = await fs.readdir(inputPath);
-      const webpFiles = files.filter(f => f.toLowerCase().endsWith('.webp'));
-      log('DEBUG', `Found ${webpFiles.length} WebP files: ${webpFiles.join(', ')}`);
-      if (webpFiles.length === 0) {
-        log('INFO', 'No WebP files found in the directory.');
+      if (!isValidFilePath(inputPath)) {
+        log('ERROR', `Invalid filename in input path: ${path.basename(inputPath)}`, { basePath: path.dirname(inputPath) });
+        return 'error';
+      }
+      const isValid = await validateImageStream(inputPath);
+      if (!isValid) {
+        log('INFO', `Processed 0 of 1 WebP files to JPG.`);
         return 'success';
       }
+      const outputFile = path.join(outputDir, path.basename(inputPath, '.webp') + '.jpg');
+      if (!isValidFilePath(outputFile)) {
+        log('ERROR', `Invalid filename in output path: ${path.basename(outputFile)}`, { basePath: path.dirname(outputDir) });
+        return 'error';
+      }
+      log('DEBUG', `Generated output filename: ${path.basename(outputFile)}`, { basePath: path.dirname(outputDir) });
+      try {
+        await processWebpToJpg(inputPath, outputFile, path.dirname(inputPath), params);
+        log('INFO', `Processed 1 of 1 WebP files to JPG.`);
+      } catch (error) {
+        log('ERROR', `Failed to process ${path.basename(inputPath)}: ${error.message}`, { basePath: path.dirname(inputPath) });
+        if (params.verbose) log('DEBUG', `Error stack: ${error.stack}`, { basePath: path.dirname(inputPath) });
+        return 'error';
+      }
+    } else if (stats.isDirectory()) {
+      log('DEBUG', `Reading directory: ${path.basename(inputPath)}`, { basePath: path.dirname(inputPath) });
+      const files = await fs.readdir(inputPath);
+      const webpFiles = [];
+      log('DEBUG', `Checking ${files.length} files in directory: ${path.basename(inputPath)}`, { basePath: path.dirname(inputPath) });
+      for (const file of files) {
+        if (file.toLowerCase().endsWith('.webp') && isValidFilePath(file)) {
+          const inputFile = path.join(inputPath, file);
+          const isValid = await validateImageStream(inputFile);
+          if (isValid) {
+            webpFiles.push(file);
+          }
+        }
+      }
+      log('DEBUG', `Found ${webpFiles.length} valid WebP files: ${webpFiles.length > 0 ? webpFiles.map(f => path.relative(inputPath, path.join(inputPath, f))).join(', ') : 'none'}`, { basePath: inputPath });
+      if (webpFiles.length === 0) {
+        log('INFO', `No valid WebP files found in ${path.basename(inputPath)}`, { basePath: path.dirname(inputPath) });
+        return 'success';
+      }
+      let processedCount = 0;
       for (const file of webpFiles) {
         const inputFile = path.join(inputPath, file);
         const outputFile = path.join(outputDir, path.basename(file, '.webp') + '.jpg');
-        log('DEBUG', `Generated output filename: ${outputFile}`);
-        await processWebpToJpg(inputFile, outputFile);
+        if (!isValidFilePath(outputFile)) {
+          log('ERROR', `Invalid filename in output path: ${path.basename(outputFile)}`, { basePath: path.dirname(outputDir) });
+          continue;
+        }
+        log('DEBUG', `Generated output filename: ${path.basename(outputFile)}`, { basePath: path.dirname(outputDir) });
+        try {
+          await processWebpToJpg(inputFile, outputFile, inputPath, params);
+          processedCount++;
+        } catch (error) {
+          log('ERROR', `Failed to process ${path.basename(inputFile)}: ${error.message}`, { basePath: inputPath });
+          if (params.verbose) log('DEBUG', `Error stack: ${error.stack}`, { basePath: inputPath });
+          continue;
+        }
       }
-      log('INFO', `Processed ${webpFiles.length} WebP files to JPG.`);
+      log('INFO', `Processed ${processedCount} of ${webpFiles.length} WebP files to JPG.`);
     }
 
     log('DEBUG', 'WebP to JPG Conversion completed successfully');
     return 'success';
   } catch (error) {
-    log('ERROR', `Unexpected error in WebP to JPG Conversion: ${error.message}`);
-    log('DEBUG', `Error stack: ${error.stack}`);
+    log('ERROR', `Unexpected error in WebP to JPG Conversion: ${error.message}`, { basePath: inputPath || BASE_DIR });
+    if (params.verbose) log('DEBUG', `Error stack: ${error.stack}`, { basePath: inputPath || BASE_DIR });
     return 'error';
   }
 }
 
 if (require.main === module) {
-  convertWebpToJpg().then(result => {
+  const params = parseArgs(process.argv.slice(2));
+  convertWebpToJpg(params).then(result => {
     process.exit(result === 'success' ? 0 : 1);
   }).catch(err => {
-    log('ERROR', `Fatal error: ${err.message}`);
+    log('ERROR', `Fatal error: ${err.message}`, { basePath: BASE_DIR });
     process.exit(1);
   });
 }
