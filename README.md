@@ -1,6 +1,6 @@
-# Metadata Update Tool
+# File Manipulator Tool
 
-This is a Node.js application designed to update metadata for various file types including JPG, MP4, PNG, WAV, WebM, and WebP. It uses ExifTool for most file types and FFmpeg for video/audio formats, providing a flexible way to embed titles, descriptions, keywords, copyrights, genres, and comments into your files.
+This is a Node.js application designed to automate and simplify tasks concerning files
 
 ## Prerequisites
 
