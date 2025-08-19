@@ -34,6 +34,13 @@ async function renameFiles(args = process.argv.slice(2)) {
     let inputDir;
     if (params['input']) {
       inputDir = params['input'];
+      const resolvedInput = path.resolve(inputDir);
+      const realPath = await fs.realpath(resolvedInput); // Use async realpath
+      const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+      if (forbiddenDirs.some(dir => realPath.startsWith(path.resolve(dir)))) {
+        log('ERROR', `Input directory ${inputDir} is in a system directory.`);
+        return 'error';
+      }
       try {
         await fs.access(inputDir);
         log('DEBUG', `Input directory from args: ${inputDir}`);
@@ -49,8 +56,14 @@ async function renameFiles(args = process.argv.slice(2)) {
         message: 'Enter the directory containing files to rename (or press Enter to cancel):',
         validate: async (value) => {
           if (value.trim() === '') return true;
+          const resolvedPath = path.resolve(value);
+          const realPath = await fs.realpath(resolvedPath); // Use async realpath
+          const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+          if (forbiddenDirs.some(dir => realPath.startsWith(path.resolve(dir)))) {
+            return 'System directory not allowed.';
+          }
           try {
-            await fs.access(value);
+            await fs.access(resolvedPath);
             return true;
           } catch {
             return 'Directory not found.';
@@ -67,7 +80,7 @@ async function renameFiles(args = process.argv.slice(2)) {
 
     let fileNameBase;
     if (params['base']) {
-      fileNameBase = params['base'];
+      fileNameBase = params['base'].replace(/[^a-zA-Z0-9-]/g, ''); // Sanitize
       log('DEBUG', `Base name from args: ${fileNameBase}`);
     } else {
       log('DEBUG', 'Prompting for base name');
@@ -75,9 +88,12 @@ async function renameFiles(args = process.argv.slice(2)) {
         type: 'text',
         name: 'base',
         message: 'Enter the base name for renamed files (e.g., "file" becomes "file-1", "file-2", etc.):',
-        validate: value => value.trim() !== '' ? true : 'Base name required.'
+        validate: value => {
+          const sanitized = value.replace(/[^a-zA-Z0-9-]/g, '');
+          return sanitized.trim() !== '' ? true : 'Base name required.';
+        }
       });
-      fileNameBase = fileNameBaseResponse.base;
+      fileNameBase = fileNameBaseResponse.base.replace(/[^a-zA-Z0-9-]/g, ''); // Sanitize
       log('DEBUG', `Base name provided: ${fileNameBase}`);
       if (!fileNameBase) {
         log('INFO', 'No base name provided, cancelling...');

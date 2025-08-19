@@ -18,6 +18,32 @@ function generateUniqueFilename(originalPath) {
   return `${baseName}-${timestamp}${ext}`;
 }
 
+// Validate if a file is a valid video
+async function validateVideoStream(inputFile) {
+  return new Promise((resolve) => {
+    log('DEBUG', `Running ffprobe on ${path.basename(inputFile)}`, { basePath: path.dirname(inputFile) });
+    ffmpeg.ffprobe(inputFile, (err, metadata) => {
+      if (err) {
+        log('DEBUG', `FFprobe error for ${path.basename(inputFile)}: ${err.message}`, { basePath: path.dirname(inputFile) });
+        log('INFO', `Skipping ${path.basename(inputFile)}: Not a valid video (FFprobe error).`, { basePath: path.dirname(inputFile) });
+        resolve(false);
+      } else {
+        log('DEBUG', `FFprobe metadata for ${path.basename(inputFile)}: ${JSON.stringify(metadata.streams, null, 2)}`, { basePath: path.dirname(inputFile) });
+        const hasValidVideo = metadata.streams.some(
+          stream => stream.codec_type === 'video' && 
+          Number(stream.nb_frames) > 1 && // Require more than one frame
+          (stream.duration && parseFloat(stream.duration) >= 0.1) // Require duration >= 0.1 seconds
+        );
+        if (!hasValidVideo) {
+          log('INFO', `Skipping ${path.basename(inputFile)}: Not a valid video (insufficient frames or duration).`, { basePath: path.dirname(inputFile) });
+        }
+        log('DEBUG', `Validation result for ${path.basename(inputFile)}: ${hasValidVideo}`, { basePath: path.dirname(inputFile) });
+        resolve(hasValidVideo);
+      }
+    });
+  });
+}
+
 // Process a single video
 async function processVideo(inputPath, outputPath, width, height, method) {
   return new Promise((resolve) => {
@@ -99,6 +125,13 @@ async function resizeVideos(args = process.argv.slice(2)) {
     let inputPath;
     if (params['input']) {
       inputPath = params['input'];
+      const resolvedInput = path.resolve(inputPath);
+      const realPath = await fsPromises.realpath(resolvedInput); // Check for forbidden directories
+      const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+      if (forbiddenDirs.some(dir => realPath.startsWith(path.resolve(dir)))) {
+        log('ERROR', `Input path ${inputPath} is in a system directory.`);
+        return 'error';
+      }
       if (!fs.existsSync(inputPath)) {
         log('ERROR', `Input path not found: ${inputPath}`);
         return 'error';
@@ -110,7 +143,17 @@ async function resizeVideos(args = process.argv.slice(2)) {
         type: 'text',
         name: 'path',
         message: 'Enter the path to the input video file or directory (or press Enter to cancel):',
-        validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Path not found.'
+        validate: async (value) => {
+          if (value.trim() === '') return true;
+          const resolvedPath = path.resolve(value);
+          const realPath = await fsPromises.realpath(resolvedPath); // Check for forbidden directories
+          const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+          if (forbiddenDirs.some(dir => realPath.startsWith(path.resolve(dir)))) {
+            return 'System directory not allowed.';
+          }
+          if (!fs.existsSync(resolvedPath)) return 'Path not found.';
+          return true;
+        }
       });
       inputPath = inputPathResponse.path;
       log('DEBUG', `Input path provided: ${inputPath}`);
@@ -123,6 +166,13 @@ async function resizeVideos(args = process.argv.slice(2)) {
     let outputDir;
     if (params['output']) {
       outputDir = params['output'];
+      const resolvedOutput = path.resolve(outputDir);
+      const realPath = await fsPromises.realpath(resolvedOutput); // Check for forbidden directories
+      const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+      if (forbiddenDirs.some(dir => realPath.startsWith(path.resolve(dir)))) {
+        log('ERROR', `Output directory ${outputDir} is in a system directory.`);
+        return 'error';
+      }
       log('DEBUG', `Output directory from args: ${outputDir}`);
     } else {
       log('DEBUG', 'Prompting for output directory');
@@ -130,7 +180,16 @@ async function resizeVideos(args = process.argv.slice(2)) {
         type: 'text',
         name: 'path',
         message: 'Enter the path for the output directory (or press Enter to cancel):',
-        validate: value => value.trim() !== '' ? true : 'Output directory required.'
+        validate: async (value) => {
+          if (value.trim() === '') return 'Output directory required.';
+          const resolvedPath = path.resolve(value);
+          const realPath = await fsPromises.realpath(resolvedPath); // Check for forbidden directories
+          const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+          if (forbiddenDirs.some(dir => realPath.startsWith(path.resolve(dir)))) {
+            return 'System directory not allowed.';
+          }
+          return true;
+        }
       });
       outputDir = outputPathResponse.path;
       log('DEBUG', `Output directory provided: ${outputDir}`);
@@ -256,6 +315,12 @@ async function resizeVideos(args = process.argv.slice(2)) {
         log('ERROR', `Input file must be one of ${SUPPORTED_EXTENSIONS.join(', ')}.`);
         return 'error';
       }
+      // Validate the file is a valid video
+      const isValidVideo = await validateVideoStream(inputPath);
+      if (!isValidVideo) {
+        log('INFO', `Skipped ${path.basename(inputPath)}: Not a valid video.`);
+        return 'success';
+      }
       const outputFile = path.join(outputDir, generateUniqueFilename(inputPath));
       log('DEBUG', `Generated output filename: ${outputFile}`);
       const success = await processVideo(inputPath, outputFile, width, height, method);
@@ -264,13 +329,26 @@ async function resizeVideos(args = process.argv.slice(2)) {
     } else if (stats.isDirectory()) {
       log('DEBUG', `Reading directory: ${inputPath}`);
       const files = await fsPromises.readdir(inputPath);
-      const videoFiles = files.filter(f => SUPPORTED_EXTENSIONS.includes(path.extname(f).toLowerCase()));
-      log('DEBUG', `Found ${videoFiles.length} supported video files: ${videoFiles.join(', ')}`);
-      if (videoFiles.length === 0) {
-        log('INFO', 'No supported video files found in the directory.');
+      const potentialVideoFiles = files.filter(f => SUPPORTED_EXTENSIONS.includes(path.extname(f).toLowerCase()));
+      log('DEBUG', `Found ${potentialVideoFiles.length} potential video files: ${potentialVideoFiles.join(', ')}`);
+
+      // Validate each potential video file before processing
+      const validVideoFiles = [];
+      for (const file of potentialVideoFiles) {
+        const inputFile = path.join(inputPath, file);
+        const isValidVideo = await validateVideoStream(inputFile);
+        if (isValidVideo) {
+          validVideoFiles.push(file);
+        }
+      }
+
+      log('DEBUG', `Found ${validVideoFiles.length} valid video files: ${validVideoFiles.join(', ')}`);
+      if (validVideoFiles.length === 0) {
+        log('INFO', 'No valid video files found in the directory.');
         return 'success';
       }
-      for (const file of videoFiles) {
+
+      for (const file of validVideoFiles) {
         const inputFile = path.join(inputPath, file);
         const outputFile = path.join(outputDir, generateUniqueFilename(file));
         log('DEBUG', `Generated output filename: ${outputFile}`);

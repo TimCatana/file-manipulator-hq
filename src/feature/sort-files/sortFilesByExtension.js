@@ -34,6 +34,13 @@ async function sortFilesByExtension(args = process.argv.slice(2)) {
     let inputDir;
     if (params['input']) {
       inputDir = params['input'];
+      const resolvedInput = path.resolve(inputDir);
+      const realPath = await fs.realpath(resolvedInput); // Check for forbidden directories
+      const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+      if (forbiddenDirs.some(dir => realPath.startsWith(path.resolve(dir)))) {
+        log('ERROR', `Input directory ${inputDir} is in a system directory.`);
+        return 'error';
+      }
       if (!await fs.stat(inputDir).then(stats => stats.isDirectory()).catch(() => false)) {
         log('ERROR', `Input path not found or not a directory: ${inputDir}`);
         return 'error';
@@ -45,7 +52,19 @@ async function sortFilesByExtension(args = process.argv.slice(2)) {
         type: 'text',
         name: 'dir',
         message: 'Enter the directory containing files to sort (or press Enter to cancel):',
-        validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Directory not found.'
+        validate: async (value) => {
+          if (value.trim() === '') return true;
+          const resolvedPath = path.resolve(value);
+          const realPath = await fs.realpath(resolvedPath); // Check for forbidden directories
+          const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+          if (forbiddenDirs.some(dir => realPath.startsWith(path.resolve(dir)))) {
+            return 'System directory not allowed.';
+          }
+          if (!await fs.stat(resolvedPath).then(stats => stats.isDirectory()).catch(() => false)) {
+            return 'Path not found or not a directory.';
+          }
+          return true;
+        }
       });
       inputDir = inputDirResponse.dir;
       log('DEBUG', `Input directory provided: ${inputDir}`);
@@ -58,6 +77,13 @@ async function sortFilesByExtension(args = process.argv.slice(2)) {
     let outputDir;
     if (params['output']) {
       outputDir = params['output'];
+      const resolvedOutput = path.resolve(outputDir);
+      const realPath = await fs.realpath(resolvedOutput); // Check for forbidden directories
+      const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+      if (forbiddenDirs.some(dir => realPath.startsWith(path.resolve(dir)))) {
+        log('ERROR', `Output directory ${outputDir} is in a system directory.`);
+        return 'error';
+      }
       log('DEBUG', `Output directory from args: ${outputDir}`);
     } else {
       log('DEBUG', 'Prompting for output directory');
@@ -65,7 +91,16 @@ async function sortFilesByExtension(args = process.argv.slice(2)) {
         type: 'text',
         name: 'dir',
         message: 'Enter the output directory to sort files into (or press Enter to cancel):',
-        validate: value => value.trim() !== '' ? true : 'Output directory required.'
+        validate: async (value) => {
+          if (value.trim() === '') return 'Output directory required.';
+          const resolvedPath = path.resolve(value);
+          const realPath = await fs.realpath(resolvedPath); // Check for forbidden directories
+          const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+          if (forbiddenDirs.some(dir => realPath.startsWith(path.resolve(dir)))) {
+            return 'System directory not allowed.';
+          }
+          return true;
+        }
       });
       outputDir = outputDirResponse.dir;
       log('DEBUG', `Output directory provided: ${outputDir}`);
@@ -80,29 +115,33 @@ async function sortFilesByExtension(args = process.argv.slice(2)) {
     log('DEBUG', `Output directory created or verified: ${outputDir}`);
 
     log('DEBUG', `Reading directory: ${inputDir}`);
-    const dirEntries = await fs.readdir(inputDir);
+    const dirEntries = await fs.readdir(inputDir, { withFileTypes: true });
     const files = [];
     for (const entry of dirEntries) {
-      const fullPath = path.join(inputDir, entry);
-      const stats = await fs.stat(fullPath);
-      if (stats.isFile()) {
-        files.push(fullPath);
+      if (entry.isFile()) {
+        const fullPath = path.join(inputDir, entry.name);
+        const stats = await fs.stat(fullPath);
+        files.push({ path: fullPath, stats });
+        log('DEBUG', `Found file: ${fullPath}, size: ${stats.size} bytes`);
       }
     }
-    log('DEBUG', `Found ${files.length} files in ${inputDir}: ${files.join(', ')}`);
+    log('DEBUG', `Found ${files.length} files in ${inputDir}: ${files.map(f => path.basename(f.path)).join(', ')}`);
 
     if (files.length === 0) {
       log('INFO', `No files found in ${inputDir}`);
       return 'success';
     }
 
-    const supportedExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.mp4', '.webp'];
+    // Dynamically determine unique extensions from files
+    const uniqueExtensions = new Set(files.map(file => path.extname(file.path).toLowerCase()).filter(ext => ext));
+    log('DEBUG', `Detected unique extensions: ${Array.from(uniqueExtensions).join(', ')}`);
+
     let processed = 0, failed = 0, skipped = 0;
 
     for (const file of files) {
-      const ext = path.extname(file).toLowerCase();
-      if (!supportedExtensions.includes(ext)) {
-        log('DEBUG', `Skipping file with unsupported extension: ${file}`);
+      const ext = path.extname(file.path).toLowerCase();
+      if (!ext) {
+        log('DEBUG', `Skipping file with no extension: ${file.path}`);
         skipped++;
         continue;
       }
@@ -112,27 +151,27 @@ async function sortFilesByExtension(args = process.argv.slice(2)) {
       await fs.mkdir(extDir, { recursive: true });
       log('DEBUG', `Extension directory created or verified: ${extDir}`);
 
-      const destFile = path.join(extDir, path.basename(file));
-      log('DEBUG', `Copying ${file} to ${destFile}`);
+      const destFile = path.join(extDir, path.basename(file.path));
+      log('DEBUG', `Moving ${file.path} to ${destFile}`);
       try {
-        await fs.copyFile(file, destFile);
-        log('INFO', `Sorted ${path.basename(file)} to ${ext.slice(1)} folder`);
+        await fs.rename(file.path, destFile);
+        log('INFO', `Moved ${path.basename(file.path)} to ${ext.slice(1)} folder`);
         try {
           const stats = await fs.stat(destFile);
-          log('DEBUG', `Sorted file size: ${stats.size} bytes for ${destFile}`);
+          log('DEBUG', `Moved file size: ${stats.size} bytes for ${destFile}`);
         } catch (statError) {
           log('DEBUG', `Failed to retrieve file size for ${destFile}: ${statError.message}`);
         }
         processed++;
       } catch (error) {
-        log('ERROR', `Failed to sort ${file} to ${destFile}: ${error.message}`);
-        log('DEBUG', `Copy error stack: ${error.stack}`);
+        log('ERROR', `Failed to move ${file.path} to ${destFile}: ${error.message}`);
+        log('DEBUG', `Move error stack: ${error.stack}`);
         failed++;
       }
     }
 
-    log('INFO', `Sorted ${processed} files, ${failed} failed, ${skipped} skipped.`);
-    log('DEBUG', `Sort Files By Extension completed: ${processed} processed, ${failed} failed, ${skipped} skipped`);
+    log('INFO', `Moved ${processed} files, ${failed} failed, ${skipped} skipped.`);
+    log('DEBUG', `Sort Files By Extension completed: ${processed} moved, ${failed} failed, ${skipped} skipped`);
     return failed === 0 ? 'success' : 'error';
   } catch (error) {
     log('ERROR', `Unexpected error in Sort Files By Extension: ${error.message}`);

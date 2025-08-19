@@ -8,12 +8,12 @@ const sharp = require('sharp');
 const { log } = require('../../backend/utils/logUtils');
 
 // Supported image extensions
-const SUPPORTED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+const SUPPORTED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 
 // Generate unique filename
 function generateUniqueFilename(originalPath) {
   const timestamp = new Date().toISOString().replace(/[-:.T]/g, '').slice(0, 14); // e.g., 20250310123456
-  const baseName = path.basename(originalPath, path.extname(originalPath));
+  const baseName = path.basename(originalPath, path.extname(originalPath)).replace(/[^a-zA-Z0-9-]/g, ''); // Sanitize
   const ext = path.extname(originalPath);
   return `${baseName}-${timestamp}${ext}`;
 }
@@ -104,6 +104,13 @@ async function resizeImages(args = process.argv.slice(2)) {
     let inputPath;
     if (params['input']) {
       inputPath = params['input'];
+      const resolvedInput = path.resolve(inputPath);
+      const realPath = await fsPromises.realpath(resolvedInput); // Check for forbidden directories
+      const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+      if (forbiddenDirs.some(dir => realPath.startsWith(path.resolve(dir)))) {
+        log('ERROR', `Input path ${inputPath} is in a system directory.`);
+        return 'error';
+      }
       if (!fs.existsSync(inputPath)) {
         log('ERROR', `Input path not found: ${inputPath}`);
         return 'error';
@@ -115,7 +122,17 @@ async function resizeImages(args = process.argv.slice(2)) {
         type: 'text',
         name: 'path',
         message: 'Enter the path to the input image file or directory (or press Enter to cancel):',
-        validate: value => value.trim() === '' || fs.existsSync(value) ? true : 'Path not found.'
+        validate: async (value) => {
+          if (value.trim() === '') return true;
+          const resolvedPath = path.resolve(value);
+          const realPath = await fsPromises.realpath(resolvedPath); // Check for forbidden directories
+          const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+          if (forbiddenDirs.some(dir => realPath.startsWith(path.resolve(dir)))) {
+            return 'System directory not allowed.';
+          }
+          if (!fs.existsSync(resolvedPath)) return 'Path not found.';
+          return true;
+        }
       });
       inputPath = inputPathResponse.path;
       log('DEBUG', `Input path provided: ${inputPath}`);
@@ -128,6 +145,13 @@ async function resizeImages(args = process.argv.slice(2)) {
     let outputDir;
     if (params['output']) {
       outputDir = params['output'];
+      const resolvedOutput = path.resolve(outputDir);
+      const realPath = await fsPromises.realpath(resolvedOutput); // Check for forbidden directories
+      const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+      if (forbiddenDirs.some(dir => realPath.startsWith(path.resolve(dir)))) {
+        log('ERROR', `Output directory ${outputDir} is in a system directory.`);
+        return 'error';
+      }
       log('DEBUG', `Output directory from args: ${outputDir}`);
     } else {
       log('DEBUG', 'Prompting for output directory');
@@ -135,7 +159,16 @@ async function resizeImages(args = process.argv.slice(2)) {
         type: 'text',
         name: 'path',
         message: 'Enter the path for the output directory (or press Enter to cancel):',
-        validate: value => value.trim() !== '' ? true : 'Output directory required.'
+        validate: async (value) => {
+          if (value.trim() === '') return 'Output directory required.';
+          const resolvedPath = path.resolve(value);
+          const realPath = await fsPromises.realpath(resolvedPath); // Check for forbidden directories
+          const forbiddenDirs = ['/etc', '/usr', '/var', '/bin', '/sbin', 'C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)'];
+          if (forbiddenDirs.some(dir => realPath.startsWith(path.resolve(dir)))) {
+            return 'System directory not allowed.';
+          }
+          return true;
+        }
       });
       outputDir = outputPathResponse.path;
       log('DEBUG', `Output directory provided: ${outputDir}`);
